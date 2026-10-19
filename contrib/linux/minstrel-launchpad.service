@@ -1,0 +1,29 @@
+# systemd unit for minstrel-launchpad.
+#
+#   sudo install -m 755 minstrel-launchpad /usr/local/bin/
+#   sudo install -m 644 minstrel-launchpad.service /etc/systemd/system/
+#   sudo systemctl enable --now minstrel-launchpad
+#   journalctl -u minstrel-launchpad      # the console's setup link
+#
+# It runs as a throwaway user with its data in /var/lib/minstrel-launchpad.
+# Back that directory up: losing the key means pairing every device again.
+
+[Unit]
+Description=minstrel-launchpad: the Minstrel app's way home
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/minstrel-launchpad serve
+Environment=LAUNCHPAD_DATA=/var/lib/minstrel-launchpad
+StateDirectory=minstrel-launchpad
+DynamicUser=yes
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,43 @@
+#!/bin/sh
+#
+# PROVIDE: launchpad
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+#
+# minstrel-launchpad: lets the Minstrel app reach this home's media servers.
+#
+# launchpad_enable="YES"
+# launchpad_data="/var/db/launchpad"
+#
+# Everything else, the name shown in the app included, is set on the
+# launchpad's web console (port 7444, home network only).
+
+. /etc/rc.subr
+
+name=launchpad
+rcvar=launchpad_enable
+load_rc_config $name
+
+: ${launchpad_enable:="NO"}
+: ${launchpad_user:="launchpad"}
+: ${launchpad_data:="/var/db/launchpad"}
+
+pidfile="/var/run/${name}/${name}.pid"
+program="/usr/local/bin/minstrel-launchpad"
+# The pid file holds daemon(8), which restarts the launchpad if it exits.
+procname="daemon"
+command="/usr/sbin/daemon"
+command_args="-r -P ${pidfile} -o /var/log/${name}.log ${program} serve -data ${launchpad_data}"
+start_precmd="${name}_prestart"
+
+launchpad_prestart()
+{
+	install -d -o ${launchpad_user} -m 700 ${launchpad_data}
+	install -d -o ${launchpad_user} -m 755 /var/run/${name}
+	touch /var/log/${name}.log
+	chown ${launchpad_user} /var/log/${name}.log
+	# rc.subr starts daemon(8) as ${launchpad_user}, so the pid file needs
+	# a directory that user owns.
+}
+
+run_rc_command "$1"
