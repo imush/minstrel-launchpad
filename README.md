@@ -14,7 +14,22 @@ It does one narrow job:
   rewrites the LAN URLs in their responses to point back through itself.
 
 No cloud account, no VPN, no certificate authority. Audio is passed through
-as the server sends it; nothing is transcoded.
+as the server sends it, unless the app asks for compression (below).
+
+## Compression
+
+For listening over mobile data, the app can ask for lossless files (FLAC,
+WAV, AIFF, DSD, APE, WavPack) as AAC at 128 to 320 kbit/s; it is a setting
+in the app, off by default. Players and the app at home always get the
+original, and lossy files pass through untouched.
+
+It needs ffmpeg on the launchpad's machine (`-ffmpeg`, default: from
+PATH); without it the launchpad says so and sends originals. Playback
+starts while ffmpeg works. Conversions run at low priority and at most
+four times playback speed, so a small NAS or router isn't swamped: about a
+quarter of one Atom C2750 core per listener. Finished conversions are
+kept (`-transcode-cache`, 1024 MB, a week) so replays and seeking are
+served from disk.
 
 ## Direct mode
 
@@ -47,7 +62,12 @@ A web page on port 7444, for the home network only:
 
 - **Outside access**: the static IP or dynamic DNS name (and router port)
   the app uses away from home. Paired devices pick up a change the next
-  time they connect. (Headscale, through minstrel-satellite, comes later.)
+  time they connect.
+- **Satellite**: instead of a forwarded port, or as well, paste an invitation
+  link from a [minstrel-satellite](https://github.com/imush/minstrel-satellite).
+  The launchpad connects out to it, and the app goes through it only when
+  it can't reach home directly. TLS stays end to end; the satellite only
+  passes the bytes on.
 - **Pair a device**: an invitation as a QR code to scan now (valid ten
   minutes), or a pairing file to send (valid a day or a week), opened in
   the app with Add home → Open pairing file. Label it with who it's for.

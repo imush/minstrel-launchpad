@@ -21,6 +21,8 @@ type Pairing struct {
 	Fingerprint string
 	Port        string // the port the launchpad listens on
 	Store       *auth.Store
+	// Relays lists where the home is reachable through a satellite.
+	Relays func() []string
 
 	mu     sync.RWMutex
 	name   string
@@ -66,6 +68,7 @@ type Invitation struct {
 	Code      string    `json:"code"`
 	Expires   time.Time `json:"expires"`
 	Addresses []string  `json:"addresses"`
+	Relays    []string  `json:"relays,omitempty"`
 }
 
 // New creates an invitation valid for ttl, for the device or person label.
@@ -83,10 +86,24 @@ func (p *Pairing) New(label string, ttl time.Duration) (Invitation, error) {
 	for _, a := range addrs {
 		q.Add("a", a)
 	}
+	relays := p.RelayAddresses()
+	for _, r := range relays {
+		q.Add("r", r)
+	}
 	return Invitation{
 		ID: inv.ID, Label: inv.Label, URI: "minstrel://pair?" + q.Encode(),
-		Code: code, Expires: inv.Expires, Addresses: addrs,
+		Code: code, Expires: inv.Expires, Addresses: addrs, Relays: relays,
 	}, nil
+}
+
+// RelayAddresses lists where the app can reach the launchpad through a
+// satellite. The app tries them only when the direct addresses fail, since
+// relayed traffic costs the satellite's owner.
+func (p *Pairing) RelayAddresses() []string {
+	if p == nil || p.Relays == nil {
+		return nil
+	}
+	return p.Relays()
 }
 
 // Addresses lists where the app can reach the launchpad: the configured
@@ -153,6 +170,7 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"fingerprint": a.Fingerprint,
 			"curlPin":     a.CurlPin,
 			"addresses":   a.Pairing.Addresses(),
+			"relays":      a.Pairing.RelayAddresses(),
 			"servers":     a.Registry.Servers(),
 			"devices":     len(a.Store.Devices()),
 		})

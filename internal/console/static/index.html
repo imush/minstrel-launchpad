@@ -57,7 +57,7 @@
       <p class="muted">How the app reaches home when you're away.</p>
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected="true" class="tab" data-tab="direct">Direct</button>
-        <button role="tab" aria-selected="false" class="tab" data-tab="headscale">Headscale</button>
+        <button role="tab" aria-selected="false" class="tab" data-tab="satellite">Satellite</button>
       </div>
       <div id="tab-direct">
         <p class="muted small">Forward a TCP port on your router to this launchpad (port <b class="port"></b>), then enter
@@ -74,13 +74,23 @@
         <p class="muted small">Paired devices pick up a changed address the next time they connect.</p>
         <p class="muted small">At home the app uses <span id="lan"></span>.</p>
       </div>
-      <div id="tab-headscale" hidden>
-        <p class="muted">Coming later: connect through a minstrel-satellite (Headscale) instead of a forwarded port,
-          for homes behind carrier-grade NAT or without access to the router.</p>
-        <fieldset disabled>
-          <label>Satellite URL <input placeholder="https://satellite.example.net"></label>
-          <label>Pre-auth key <input placeholder="hskey-auth-…"></label>
-        </fieldset>
+      <div id="tab-satellite" hidden>
+        <p class="muted small">No port to forward: the launchpad connects out to a minstrel-satellite, and the app
+          goes through it when it can't reach home directly. Your music stays encrypted all the way; the satellite
+          only passes it on. Paste the invitation link from the satellite's owner.</p>
+        <form id="satellite-form">
+          <label for="satellite" class="visually-hidden">Satellite invitation link</label>
+          <input id="satellite" spellcheck="false" autocapitalize="off" autocomplete="off"
+                 placeholder="minstrel-satellite://sat.example.org:443?c=…&amp;fp=…">
+          <p class="note" id="satellite-locked" hidden>Set by <code>-satellite</code> / <code>LAUNCHPAD_SATELLITE</code>; change it there.</p>
+          <div class="row">
+            <button type="submit" id="satellite-save">Save</button>
+            <button type="button" id="satellite-leave" class="ghost" hidden>Leave satellite</button>
+            <span class="error" id="satellite-error" role="alert"></span>
+          </div>
+        </form>
+        <p class="muted small" id="satellite-status" role="status"></p>
+        <p class="muted small">Devices paired before joining pick up the satellite the next time they connect.</p>
       </div>
     </section>
 

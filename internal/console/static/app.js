@@ -160,6 +160,7 @@ function render(s) {
   if (!$('public').dataset.dirty) $('public').value = s.public.join('\n');
   $('public').disabled = $('public-save').disabled = s.publicLocked;
   $('public-locked').hidden = !s.publicLocked;
+  renderSatellite(s);
   if (!$('manual').dataset.dirty) $('manual').value = s.manual.join('\n');
   $('manual').disabled = $('servers-save').disabled = s.serversLocked;
   $('servers-locked').hidden = !s.serversLocked;
@@ -227,7 +228,32 @@ function alertError(x) {
   el.textContent = x.message;
 }
 
-for (const id of ['name', 'public', 'manual']) {
+function renderSatellite(s) {
+  const sat = s.satellite || {};
+  const joined = Boolean(sat.satellite);
+  // The saved link isn't shown back: once used, its code is spent.
+  if (!$('satellite').dataset.dirty) $('satellite').value = '';
+  $('satellite').placeholder = joined ? 'Paste a new link to switch satellites'
+    : 'minstrel-satellite://sat.example.org:443?c=…&fp=…';
+  $('satellite').disabled = $('satellite-save').disabled = s.satelliteLocked;
+  $('satellite-leave').hidden = !joined || s.satelliteLocked;
+  $('satellite-locked').hidden = !s.satelliteLocked;
+  let text = 'Not using a satellite.';
+  if (joined) {
+    if (sat.connected) {
+      text = 'Connected to ' + sat.satellite + '. Away from home, the app can reach this home at ' + sat.host + '.';
+    } else if (sat.stopped) {
+      text = 'The satellite at ' + sat.satellite + ' refused this launchpad: ' + sat.error;
+    } else if (sat.error) {
+      text = 'Trying to reach ' + sat.satellite + ': ' + sat.error;
+    } else {
+      text = (sat.pending ? 'Joining ' : 'Connecting to ') + sat.satellite + '…';
+    }
+  }
+  $('satellite-status').textContent = text;
+}
+
+for (const id of ['name', 'public', 'manual', 'satellite']) {
   $(id).addEventListener('input', () => { $(id).dataset.dirty = '1'; });
 }
 
@@ -260,6 +286,23 @@ $('public-form').addEventListener('submit', (e) => {
   saveSettings(e.target, { public: lines('public') }, 'public-error');
 });
 
+$('satellite-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const link = $('satellite').value.trim();
+  if (!link) {
+    $('satellite-error').textContent = 'Paste the invitation link first.';
+    return;
+  }
+  saveSettings(e.target, { satellite: link }, 'satellite-error');
+  // The link takes a moment to come up.
+  setTimeout(() => load().catch(() => {}), 2500);
+});
+
+$('satellite-leave').addEventListener('click', () => {
+  $('satellite').value = '';
+  saveSettings($('satellite-form'), { satellite: '' }, 'satellite-error');
+});
+
 $('servers-form').addEventListener('submit', (e) => {
   e.preventDefault();
   saveSettings(e.target, { servers: lines('manual') }, 'servers-error');
@@ -283,7 +326,7 @@ for (const tab of document.querySelectorAll('.tab')) {
 $('invite-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('invite-error').textContent = '';
-  if (state && state.public.length === 0 && $('valid').value !== '10m') {
+  if (state && state.public.length === 0 && state.relays.length === 0 && $('valid').value !== '10m') {
     $('invite-error').textContent = 'No outside address is set, so this device will only connect at home.';
   }
   try {

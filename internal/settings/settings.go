@@ -20,6 +20,9 @@ type Settings struct {
 	Public []string `json:"public"`
 	// Servers are description URLs of media servers discovery misses.
 	Servers []string `json:"servers"`
+	// Satellite is the minstrel-satellite link, with its invitation code
+	// until the satellite has taken it.
+	Satellite string `json:"satellite,omitempty"`
 }
 
 // File is a settings file.

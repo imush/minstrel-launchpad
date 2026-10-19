@@ -31,8 +31,10 @@ import (
 	"github.com/imush/minstrel-launchpad/internal/auth"
 	"github.com/imush/minstrel-launchpad/internal/discovery"
 	"github.com/imush/minstrel-launchpad/internal/lan"
+	"github.com/imush/minstrel-launchpad/internal/satellite"
 	"github.com/imush/minstrel-launchpad/internal/server"
 	"github.com/imush/minstrel-launchpad/internal/settings"
+	"github.com/imush/minstrel-satellite/tunnel"
 )
 
 //go:embed static
@@ -57,8 +59,11 @@ type Console struct {
 	Limiter     *auth.Limiter
 	Log         *slog.Logger
 
+	// Satellite runs the link to a minstrel-satellite.
+	Satellite *satellite.Manager
+
 	// Set by flags or environment: shown, but not editable here.
-	NameLocked, PublicLocked, ServersLocked bool
+	NameLocked, PublicLocked, ServersLocked, SatelliteLocked bool
 	// TLS is set when the console is served over HTTPS.
 	TLS bool
 
@@ -263,19 +268,22 @@ func (c *Console) state(w http.ResponseWriter, r *http.Request) {
 		lanAddrs = append(lanAddrs, net.JoinHostPort(ifc.Addr.String(), c.Pairing.Port))
 	}
 	writeJSON(w, map[string]any{
-		"name":          c.Pairing.Name(),
-		"nameLocked":    c.NameLocked,
-		"version":       c.Version,
-		"fingerprint":   c.Fingerprint,
-		"port":          c.Pairing.Port,
-		"lan":           lanAddrs,
-		"public":        nonNil(c.Pairing.Public()),
-		"publicLocked":  c.PublicLocked,
-		"manual":        nonNil(set.Servers),
-		"serversLocked": c.ServersLocked,
-		"servers":       servers,
-		"devices":       devices,
-		"invitations":   invitations,
+		"name":            c.Pairing.Name(),
+		"nameLocked":      c.NameLocked,
+		"version":         c.Version,
+		"fingerprint":     c.Fingerprint,
+		"port":            c.Pairing.Port,
+		"lan":             lanAddrs,
+		"public":          nonNil(c.Pairing.Public()),
+		"publicLocked":    c.PublicLocked,
+		"satellite":       c.satelliteStatus(),
+		"satelliteLocked": c.SatelliteLocked,
+		"relays":          nonNil(c.Pairing.RelayAddresses()),
+		"manual":          nonNil(set.Servers),
+		"serversLocked":   c.ServersLocked,
+		"servers":         servers,
+		"devices":         devices,
+		"invitations":     invitations,
 	})
 }
 
@@ -284,6 +292,8 @@ func (c *Console) saveSettings(w http.ResponseWriter, r *http.Request) {
 		Name    *string   `json:"name"`
 		Public  *[]string `json:"public"`
 		Servers *[]string `json:"servers"`
+		// Satellite is a link to join, or "" to leave the satellite.
+		Satellite *string `json:"satellite"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -329,6 +339,20 @@ func (c *Console) saveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		set.Servers = servers
 	}
+	if req.Satellite != nil {
+		if c.SatelliteLocked {
+			http.Error(w, "the satellite is set by -satellite / LAUNCHPAD_SATELLITE", http.StatusConflict)
+			return
+		}
+		link := strings.TrimSpace(*req.Satellite)
+		if link != "" {
+			if _, err := tunnel.ParseLink(link); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		set.Satellite = link
+	}
 	if err := c.Settings.Save(set); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -343,6 +367,14 @@ func (c *Console) saveSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Servers != nil {
 		c.Registry.SetManual(set.Servers)
+	}
+	if req.Satellite != nil && c.Satellite != nil {
+		_ = c.Satellite.Set(set.Satellite) // checked above
+		if set.Satellite == "" {
+			c.Log.Info("satellite removed")
+		} else {
+			c.Log.Info("satellite set", "satellite", c.Satellite.Status().Satellite)
+		}
 	}
 	c.state(w, r)
 }
@@ -535,6 +567,13 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (c *Console) satelliteStatus() satellite.Status {
+	if c.Satellite == nil {
+		return satellite.Status{}
+	}
+	return c.Satellite.Status()
 }
 
 func nonNil(s []string) []string {

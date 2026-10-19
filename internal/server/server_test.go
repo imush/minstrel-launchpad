@@ -2,12 +2,15 @@ package server
 
 import (
 	"encoding/json"
+	"github.com/imush/minstrel-launchpad/internal/transcode"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +56,9 @@ func backend(t *testing.T) (*httptest.Server, *[]http.Header) {
 		case "/a.flac":
 			w.Header().Set("Content-Type", "audio/flac")
 			http.ServeContent(w, r, "a.flac", time.Time{}, strings.NewReader(audio))
+		case "/b.mp3":
+			w.Header().Set("Content-Type", "audio/mpeg")
+			http.ServeContent(w, r, "b.mp3", time.Time{}, strings.NewReader("ID3 lossy"))
 		case "/redirect":
 			http.Redirect(w, r, self+"/a.flac", http.StatusFound)
 		default:
@@ -263,5 +269,83 @@ func TestClientBase(t *testing.T) {
 	rec = do(h, "GET", "/u/"+origin+"/desc.xml", token, "", http.Header{"X-Minstrel-Base": {"https://evil.example"}})
 	if strings.Contains(rec.Body.String(), "evil") {
 		t.Errorf("foreign base accepted")
+	}
+}
+
+// fakeFFmpeg stands in for ffmpeg: it upper-cases what it reads.
+func fakeFFmpeg(t *testing.T) string {
+	path := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\ntr a-z A-Z\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestTranscode(t *testing.T) {
+	h, _, origin, token := setup(t)
+	be := origin
+	h.Transcoder = transcode.New(fakeFFmpeg(t), t.TempDir(), 2, 1<<20, h.Log)
+	if h.Transcoder == nil {
+		t.Fatal("no transcoder")
+	}
+	ask := http.Header{transcode.Header: {"aac-192"}, "Range": {"bytes=4-"}}
+
+	rec := do(h, "GET", "/u/"+be+"/a.flac", token, "", ask)
+	if rec.Code != 200 || rec.Body.String() != strings.ToUpper(audio) {
+		t.Fatalf("first: %d %q", rec.Code, rec.Body)
+	}
+	if rec.Header().Get("Content-Type") != transcode.ContentType || rec.Header().Get("X-Minstrel-Transcoded") != "aac-192" ||
+		rec.Header().Get("Content-Length") != "" || rec.Header().Get("Accept-Ranges") != "" {
+		t.Errorf("first headers: %v", rec.Header())
+	}
+
+	// Kept: now served from disk, with ranges.
+	rec = do(h, "GET", "/u/"+be+"/a.flac", token, "", ask)
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != strings.ToUpper(audio)[4:] ||
+		rec.Header().Get("Content-Type") != transcode.ContentType {
+		t.Errorf("cached: %d %q %v", rec.Code, rec.Body, rec.Header())
+	}
+
+	// Another profile is another conversion.
+	other := http.Header{transcode.Header: {"aac-128"}}
+	if rec := do(h, "GET", "/u/"+be+"/a.flac", token, "", other); rec.Code != 200 || rec.Header().Get("X-Minstrel-Transcoded") != "aac-128" {
+		t.Errorf("other profile: %d %v", rec.Code, rec.Header())
+	}
+
+	// Lossy files pass through, ranges and all.
+	rec = do(h, "GET", "/u/"+be+"/b.mp3", token, "", http.Header{transcode.Header: {"aac-192"}})
+	if rec.Code != 200 || rec.Body.String() != "ID3 lossy" || rec.Header().Get("X-Minstrel-Transcoded") != "" {
+		t.Errorf("lossy: %d %q %v", rec.Code, rec.Body, rec.Header())
+	}
+
+	// Unknown profiles are ignored.
+	rec = do(h, "GET", "/u/"+be+"/a.flac", token, "", http.Header{transcode.Header: {"mp3-999"}})
+	if rec.Code != 200 || rec.Body.String() != audio {
+		t.Errorf("unknown profile: %d %q", rec.Code, rec.Body)
+	}
+
+	var info struct{ Transcode []string }
+	json.Unmarshal(do(h, "GET", "/api/info", token, "", nil).Body.Bytes(), &info)
+	if !slices.Equal(info.Transcode, transcode.Profiles) {
+		t.Errorf("info transcode: %v", info.Transcode)
+	}
+}
+
+func TestNoTranscoderSendsOriginal(t *testing.T) {
+	be, seen := backend(t)
+	origin := strings.TrimPrefix(be.URL, "http://")
+	h, _, _, token := setup(t)
+	h.Registry = &fakeRegistry{origin: origin}
+	rec := do(h, "GET", "/u/"+origin+"/a.flac", token, "", http.Header{transcode.Header: {"aac-192"}, "Range": {"bytes=4-"}})
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != audio[4:] {
+		t.Errorf("without ffmpeg: %d %q", rec.Code, rec.Body)
+	}
+	if last := (*seen)[len(*seen)-1]; last.Get(transcode.Header) != "" {
+		t.Error("transcode header passed on to the media server")
+	}
+	var info struct{ Transcode []string }
+	json.Unmarshal(do(h, "GET", "/api/info", token, "", nil).Body.Bytes(), &info)
+	if info.Transcode == nil || len(info.Transcode) != 0 {
+		t.Errorf("info transcode without ffmpeg: %v", info.Transcode)
 	}
 }

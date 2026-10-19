@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -29,8 +30,10 @@ import (
 	"github.com/imush/minstrel-launchpad/internal/console"
 	"github.com/imush/minstrel-launchpad/internal/discovery"
 	"github.com/imush/minstrel-launchpad/internal/lan"
+	"github.com/imush/minstrel-launchpad/internal/satellite"
 	"github.com/imush/minstrel-launchpad/internal/server"
 	"github.com/imush/minstrel-launchpad/internal/settings"
+	"github.com/imush/minstrel-launchpad/internal/transcode"
 )
 
 var version = "dev"
@@ -90,6 +93,13 @@ func env(key, def string) string {
 	return def
 }
 
+func envInt(key string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil {
+		return v
+	}
+	return def
+}
+
 func dataFlag(fs *flag.FlagSet) *string {
 	def := env("LAUNCHPAD_DATA", "")
 	if def == "" {
@@ -129,6 +139,15 @@ func serve(args []string) error {
 		"comma-separated description URLs of media servers discovery doesn't find;\n"+
 			"when set, they can't be changed on the console (LAUNCHPAD_SERVERS)")
 	name := fs.String("name", env("LAUNCHPAD_NAME", host), "name shown in the app (LAUNCHPAD_NAME)")
+	satLink := fs.String("satellite", env("LAUNCHPAD_SATELLITE", ""),
+		"minstrel-satellite invitation link, for homes the app can't reach directly;\n"+
+			"when set, it can't be changed on the console (LAUNCHPAD_SATELLITE)")
+	ffmpeg := fs.String("ffmpeg", env("LAUNCHPAD_FFMPEG", "ffmpeg"),
+		"ffmpeg to compress lossless audio with, when the app asks; \"off\" to never (LAUNCHPAD_FFMPEG)")
+	tcParallel := fs.Int("transcode-jobs", envInt("LAUNCHPAD_TRANSCODE_JOBS", 2),
+		"most conversions at once; past that the original is sent (LAUNCHPAD_TRANSCODE_JOBS)")
+	tcCache := fs.Int("transcode-cache", envInt("LAUNCHPAD_TRANSCODE_CACHE", 1024),
+		"MB of converted tracks to keep for replays and seeking; 0 keeps none (LAUNCHPAD_TRANSCODE_CACHE)")
 	verbose := fs.Bool("v", env("LAUNCHPAD_DEBUG", "") != "", "debug logging (LAUNCHPAD_DEBUG)")
 	_ = fs.Parse(args)
 
@@ -175,6 +194,10 @@ func serve(args []string) error {
 	if !serversLocked {
 		serverList = set.Servers
 	}
+	satelliteLocked := *satLink != ""
+	if !satelliteLocked {
+		*satLink = set.Satellite
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -187,14 +210,24 @@ func serve(args []string) error {
 	pairing.SetName(homeName)
 	pairing.SetPublic(publicList)
 	limiter := auth.NewLimiter()
+	var tc *transcode.Transcoder
+	if *ffmpeg != "off" {
+		tc = transcode.New(*ffmpeg, filepath.Join(*data, "transcoded"), *tcParallel, int64(*tcCache)<<20, log)
+		if tc != nil {
+			log.Info("compression available", "ffmpeg", tc.Path())
+		} else {
+			log.Info("no ffmpeg: lossless audio is always sent as is")
+		}
+	}
 	h := &server.Handler{
-		Version:   version,
-		Pairing:   pairing,
-		Registry:  reg,
-		Store:     store,
-		Limiter:   limiter,
-		Log:       log,
-		Transport: server.NewTransport(),
+		Transcoder: tc,
+		Version:    version,
+		Pairing:    pairing,
+		Registry:   reg,
+		Store:      store,
+		Limiter:    limiter,
+		Log:        log,
+		Transport:  server.NewTransport(),
 	}
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
 	srv := &http.Server{
@@ -210,6 +243,28 @@ func serve(args []string) error {
 	if err != nil {
 		return err
 	}
+	sat := &satellite.Manager{
+		Cert: cert, Name: pairing.Name, Log: log,
+		Serve: func(l net.Listener) { _ = srv.ServeTLS(l, "", "") },
+		Saved: func(link string) {
+			if satelliteLocked {
+				return
+			}
+			set, err := setFile.Load()
+			if err == nil {
+				set.Satellite = link
+				err = setFile.Save(set)
+			}
+			if err != nil {
+				log.Error("saving the satellite link", "err", err)
+			}
+		},
+	}
+	pairing.Relays = sat.Hosts
+	if err := sat.Set(*satLink); err != nil {
+		return fmt.Errorf("satellite: %w", err)
+	}
+	defer sat.Close()
 	access, err := console.OpenAccess(filepath.Join(*data, "console.json"))
 	if err != nil {
 		return fmt.Errorf("console password: %w", err)
@@ -241,7 +296,9 @@ func serve(args []string) error {
 			Version: version, Fingerprint: fp,
 			Pairing: pairing, Store: store, Registry: reg, Settings: setFile,
 			Access: access, Limiter: limiter, Log: log,
-			NameLocked: nameLocked, PublicLocked: publicLocked, ServersLocked: serversLocked, TLS: *consoleTLS,
+			Satellite:  sat,
+			NameLocked: nameLocked, PublicLocked: publicLocked, ServersLocked: serversLocked,
+			SatelliteLocked: satelliteLocked, TLS: *consoleTLS,
 		}
 		csrv := &http.Server{
 			Handler:           c.Handler(),
@@ -273,9 +330,9 @@ func serve(args []string) error {
 	go func() { served <- srv.ServeTLS(ln, "", "") }()
 
 	log.Info("launchpad ready", "name", homeName, "version", version, "listen", *listen, "data", *data, "fingerprint", fp)
-	if len(pairing.Public()) == 0 {
+	if len(pairing.Public()) == 0 && *satLink == "" {
 		log.Warn("no outside address: the app can pair and play at home only; forward a port on the router " +
-			"and set its static IP or dynamic DNS name on the console, or with -public")
+			"and set its static IP or dynamic DNS name on the console, or join a satellite there")
 	}
 	if consoleURL != nil {
 		if access.HasPassword() {
@@ -318,6 +375,9 @@ func printInvitation(w io.Writer, inv server.Invitation) {
 	}
 	fmt.Fprintf(w, "Code: %s (single use, valid until %s)\n", inv.Code, inv.Expires.Local().Format("15:04"))
 	fmt.Fprintf(w, "Addresses: %s\n", strings.Join(inv.Addresses, ", "))
+	if len(inv.Relays) > 0 {
+		fmt.Fprintf(w, "Through the satellite: %s\n", strings.Join(inv.Relays, ", "))
+	}
 	fmt.Fprintf(w, "Or copy this link into the app: %s\n\n", inv.URI)
 }
 
@@ -437,6 +497,7 @@ func status(args []string) error {
 		Fingerprint string             `json:"fingerprint"`
 		CurlPin     string             `json:"curlPin"`
 		Addresses   []string           `json:"addresses"`
+		Relays      []string           `json:"relays"`
 		Servers     []discovery.Server `json:"servers"`
 		Devices     int                `json:"devices"`
 	}
@@ -445,6 +506,9 @@ func status(args []string) error {
 	}
 	fmt.Printf("%s (launchpad %s)\n", st.Name, st.Version)
 	fmt.Printf("Addresses:   %s\n", strings.Join(st.Addresses, ", "))
+	if len(st.Relays) > 0 {
+		fmt.Printf("Satellite:   %s\n", strings.Join(st.Relays, ", "))
+	}
 	fmt.Printf("Fingerprint: %s\n", st.Fingerprint)
 	fmt.Printf("curl pin:    --pinnedpubkey %s\n", st.CurlPin)
 	fmt.Printf("Paired devices: %d\n", st.Devices)

@@ -2,7 +2,7 @@
 // authenticated relay to home media servers.
 //
 //	POST /api/pair        {code, name} → {token, device}; the only open endpoint
-//	GET  /api/info        launchpad name, version, addresses, and the media servers
+//	GET  /api/info        launchpad name, version, addresses (direct and relay), and the media servers
 //	POST /api/refresh     scan the LAN now
 //	*    /u/<ip:port>/... relay to a media server, with URLs rewritten
 //
@@ -28,6 +28,7 @@ import (
 	"github.com/imush/minstrel-launchpad/internal/auth"
 	"github.com/imush/minstrel-launchpad/internal/discovery"
 	"github.com/imush/minstrel-launchpad/internal/rewrite"
+	"github.com/imush/minstrel-launchpad/internal/transcode"
 )
 
 // Bodies larger than this pass through unrewritten.
@@ -57,6 +58,9 @@ type Handler struct {
 	Limiter   *auth.Limiter
 	Log       *slog.Logger
 	Transport http.RoundTripper
+	// Transcoder, when there is ffmpeg, converts lossless audio for apps
+	// that ask (the X-Minstrel-Transcode header).
+	Transcoder *transcode.Transcoder
 }
 
 // NewTransport is the client side of the relay: LAN only, no proxies, no
@@ -178,10 +182,16 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request, dev auth.Device) 
 		"version": h.Version,
 		"device":  map[string]string{"id": dev.ID, "name": dev.Name},
 		"servers": servers,
+		// What the app may ask for in X-Minstrel-Transcode; none without ffmpeg.
+		"transcode": []string{},
+	}
+	if h.Transcoder != nil {
+		info["transcode"] = transcode.Profiles
 	}
 	// So the app follows when the outside address is changed on the console.
 	if h.Pairing != nil {
 		info["addresses"] = h.Pairing.Addresses()
+		info["relays"] = nonNil(h.Pairing.RelayAddresses())
 	}
 	writeJSON(w, info)
 }
@@ -197,6 +207,22 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request) {
 	origin := ap.String()
 	base := baseURL(r)
 	keep := func(hp string) bool { return h.Registry.Allowed(hp) || h.Registry.Learn(hp, origin) }
+
+	// A compressed version, if asked for, already made, or made now below
+	// if the file turns out to be lossless.
+	profile, key := "", ""
+	if p := r.Header.Get(transcode.Header); p != "" && h.Transcoder != nil && r.Method == http.MethodGet {
+		if _, ok := transcode.Bitrate(p); ok {
+			profile, key = p, transcode.Key(origin+"/"+rest+"?"+r.URL.RawQuery, p)
+			if f, ok := h.Transcoder.Cached(key); ok {
+				defer f.Close()
+				w.Header().Set("Content-Type", transcode.ContentType)
+				w.Header().Set("X-Minstrel-Transcoded", profile)
+				http.ServeContent(w, r, "", time.Time{}, f)
+				return
+			}
+		}
+	}
 
 	// Launchpad URLs the app sends (in SOAP arguments, say) go back to LAN form.
 	if r.Body != nil && rewrite.Rewritable(r.Header.Get("Content-Type")) && r.ContentLength <= 1<<20 {
@@ -221,6 +247,12 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request) {
 			pr.Out.Header.Del("Accept-Encoding")
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Del("X-Minstrel-Base")
+			pr.Out.Header.Del(transcode.Header)
+			if profile != "" {
+				// The whole file is converted; a range of it is no use.
+				pr.Out.Header.Del("Range")
+				pr.Out.Header.Del("If-Range")
+			}
 			rewrite.Headers(pr.Out.Header, rewrite.ToLAN)
 		},
 		Transport:     h.Transport,
@@ -228,6 +260,18 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request) {
 		ModifyResponse: func(resp *http.Response) error {
 			rewrite.Headers(resp.Header, func(v []byte) []byte { return rewrite.ToClient(v, base, keep) })
 			resp.Header.Del("Set-Cookie")
+			if profile != "" && resp.StatusCode == http.StatusOK && transcode.Lossless(resp.Header.Get("Content-Type")) {
+				if out, ok := h.Transcoder.Start(resp.Body, profile, key); ok {
+					resp.Body = out
+					resp.ContentLength = -1
+					for _, k := range []string{"Content-Length", "Content-Range", "Accept-Ranges", "Etag", "Last-Modified", "Content-Features.dlna.org", "TransferMode.dlna.org"} {
+						resp.Header.Del(k)
+					}
+					resp.Header.Set("Content-Type", transcode.ContentType)
+					resp.Header.Set("X-Minstrel-Transcoded", profile)
+					return nil
+				}
+			}
 			if r.Method == http.MethodHead || !rewrite.Rewritable(resp.Header.Get("Content-Type")) ||
 				resp.Header.Get("Content-Encoding") != "" || resp.ContentLength > maxRewrite {
 				return nil
@@ -285,4 +329,11 @@ func remoteIP(r *http.Request) string {
 		return ""
 	}
 	return ap.Addr().Unmap().String()
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }

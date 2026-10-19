@@ -3,6 +3,7 @@ package console
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -11,9 +12,12 @@ import (
 	"testing"
 
 	"github.com/imush/minstrel-launchpad/internal/auth"
+	"github.com/imush/minstrel-launchpad/internal/certs"
 	"github.com/imush/minstrel-launchpad/internal/discovery"
+	"github.com/imush/minstrel-launchpad/internal/satellite"
 	"github.com/imush/minstrel-launchpad/internal/server"
 	"github.com/imush/minstrel-launchpad/internal/settings"
+	"github.com/imush/minstrel-satellite/tunnel"
 )
 
 type fakeRegistry struct{ manual []string }
@@ -258,5 +262,86 @@ func TestSettings(t *testing.T) {
 	e.c.PublicLocked = true
 	if rec := e.do("PUT", "/api/settings", `{"public":[]}`); rec.Code != 409 {
 		t.Errorf("locked setting changed: %d", rec.Code)
+	}
+}
+
+func TestSatelliteSetting(t *testing.T) {
+	e := setup(t)
+	e.login(t)
+	cert, err := certs.LoadOrCreate(t.TempDir(), "home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := make(chan net.Listener, 4)
+	sat := &satellite.Manager{Cert: cert, Log: slog.New(slog.DiscardHandler), Serve: func(l net.Listener) { served <- l }}
+	defer sat.Close()
+	e.c.Satellite = sat
+	e.pairing.Relays = sat.Hosts
+
+	for _, bad := range []string{
+		`{"satellite":"https://sat.example.org"}`,
+		`{"satellite":"minstrel-satellite://sat.example.org"}`,
+		`{"satellite":"minstrel-satellite://203.0.113.1?fp=x"}`,
+	} {
+		if rec := e.do("PUT", "/api/settings", bad); rec.Code != 400 {
+			t.Errorf("%s accepted: %d", bad, rec.Code)
+		}
+	}
+
+	// Nothing listens at sat.invalid; the link is saved and keeps trying.
+	link := "minstrel-satellite://sat.invalid:443?c=CODE&fp=abc"
+	rec := e.do("PUT", "/api/settings", `{"satellite":"`+link+`"}`)
+	if rec.Code != 200 {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body)
+	}
+	if set, _ := e.c.Settings.Load(); set.Satellite != link {
+		t.Errorf("saved %q", set.Satellite)
+	}
+	<-served
+	var st struct {
+		Satellite satellite.Status `json:"satellite"`
+		Relays    []string         `json:"relays"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &st)
+	if st.Satellite.Satellite != "sat.invalid:443" || !st.Satellite.Pending {
+		t.Errorf("status %+v", st.Satellite)
+	}
+	// Not enrolled yet: invitations don't offer the satellite.
+	if len(st.Relays) != 0 || len(e.pairing.RelayAddresses()) != 0 {
+		t.Errorf("relays before enrolment: %v", st.Relays)
+	}
+
+	if rec := e.do("PUT", "/api/settings", `{"satellite":""}`); rec.Code != 200 {
+		t.Fatalf("leave: %d", rec.Code)
+	}
+	if sat.Status().Satellite != "" {
+		t.Error("still linked after leaving")
+	}
+
+	e.c.SatelliteLocked = true
+	if rec := e.do("PUT", "/api/settings", `{"satellite":"`+link+`"}`); rec.Code != 409 {
+		t.Errorf("locked satellite changed: %d", rec.Code)
+	}
+}
+
+func TestSatelliteHostsOnceEnrolled(t *testing.T) {
+	cert, _ := certs.LoadOrCreate(t.TempDir(), "home")
+	sat := &satellite.Manager{Cert: cert, Log: slog.New(slog.DiscardHandler), Serve: func(net.Listener) {}}
+	defer sat.Close()
+	if err := sat.Set("minstrel-satellite://sat.invalid:8443?fp=abc"); err != nil {
+		t.Fatal(err)
+	}
+	want := tunnel.HomeID(cert.Leaf.RawSubjectPublicKeyInfo) + ".sat.invalid:8443"
+	if got := sat.Hosts(); !slices.Equal(got, []string{want}) {
+		t.Fatalf("hosts %v, want %s", got, want)
+	}
+	pairing := &server.Pairing{Fingerprint: "fp", Port: "7443", Relays: sat.Hosts}
+	pairing.Store, _ = auth.Open(filepath.Join(t.TempDir(), "devices.json"))
+	inv, err := pairing.New("", 60e9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(inv.URI, "r="+strings.ReplaceAll(want, ":", "%3A")) {
+		t.Errorf("relay not in invitation: %s", inv.URI)
 	}
 }

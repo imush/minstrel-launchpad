@@ -1,3 +1,5 @@
+github.com/imush/minstrel-satellite v0.0.0-20261019223210-bc79cf733b0c h1:xV6+E1W21s3+EPh24fE+l5pWKqU8UODs/g4c48f6Pbk=
+github.com/imush/minstrel-satellite v0.0.0-20261019223210-bc79cf733b0c/go.mod h1:hXSlQXuEhec224oWC+06EfNzWMwUyg/LwpkxcdtYXpo=
 github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e h1:MRM5ITcdelLK2j1vwZ3Je0FKVCfqOLp5zO6trqMLYs0=
 github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e/go.mod h1:XV66xRDqSt+GTGFMVlhk3ULuV0y9ZmzeVGR4mloJI3M=
 golang.org/x/net v0.61.0 h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=
