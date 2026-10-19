@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Launchpad console</title>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="wrap bar">
+    <div>
+      <h1 id="title">Launchpad</h1>
+      <p class="sub" id="subtitle">minstrel-launchpad</p>
+    </div>
+    <button id="logout" class="ghost" hidden>Log out</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- Shown before logging in -->
+  <section id="gate" class="card narrow" hidden>
+    <h2 id="gate-title">Log in</h2>
+    <p id="gate-text" class="muted"></p>
+    <form id="gate-form">
+      <label>Console password
+        <input id="password" type="password" autocomplete="current-password" required minlength="8">
+      </label>
+      <label id="confirm-row" hidden>Same password again
+        <input id="confirm" type="password" autocomplete="new-password" minlength="8">
+      </label>
+      <button type="submit" id="gate-button">Log in</button>
+      <p class="error" id="gate-error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="console" hidden>
+    <section class="card">
+      <h2>Name</h2>
+      <p class="muted">What the app calls this home. Useful when a phone is paired with more than one.</p>
+      <form id="name-form">
+        <label for="name" class="visually-hidden">Name</label>
+        <input id="name" maxlength="40" autocomplete="off" placeholder="Home">
+        <p class="note" id="name-locked" hidden>Set by <code>-name</code> / <code>LAUNCHPAD_NAME</code>; change it there.</p>
+        <div class="row">
+          <button type="submit" id="name-save">Save</button>
+          <span class="error" id="name-error" role="alert"></span>
+        </div>
+      </form>
+      <p class="muted small">Paired devices pick up a new name the next time they connect, unless it was renamed in the app.</p>
+    </section>
+
+    <section class="card">
+      <h2>Outside access</h2>
+      <p class="muted">How the app reaches home when you're away.</p>
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" class="tab" data-tab="direct">Direct</button>
+        <button role="tab" aria-selected="false" class="tab" data-tab="headscale">Headscale</button>
+      </div>
+      <div id="tab-direct">
+        <p class="muted small">Forward a TCP port on your router to this launchpad (port <b class="port"></b>), then enter
+          the address the outside world sees: a static IP or a dynamic DNS name, with the router's port.
+          Port 443 gets through the most hotel and office networks. One per line.</p>
+        <form id="public-form">
+          <textarea id="public" rows="2" spellcheck="false" autocapitalize="off" placeholder="myhome.example.net:443"></textarea>
+          <p class="note" id="public-locked" hidden>Set by <code>-public</code> / <code>LAUNCHPAD_PUBLIC</code>; change it there.</p>
+          <div class="row">
+            <button type="submit" id="public-save">Save</button>
+            <span class="error" id="public-error" role="alert"></span>
+          </div>
+        </form>
+        <p class="muted small">Paired devices pick up a changed address the next time they connect.</p>
+        <p class="muted small">At home the app uses <span id="lan"></span>.</p>
+      </div>
+      <div id="tab-headscale" hidden>
+        <p class="muted">Coming later: connect through a minstrel-satellite (Headscale) instead of a forwarded port,
+          for homes behind carrier-grade NAT or without access to the router.</p>
+        <fieldset disabled>
+          <label>Satellite URL <input placeholder="https://satellite.example.net"></label>
+          <label>Pre-auth key <input placeholder="hskey-auth-…"></label>
+        </fieldset>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Pair a device</h2>
+      <form id="invite-form" class="grid">
+        <label>For <span class="muted">(optional)</span>
+          <input id="label" maxlength="64" placeholder="Anna's iPhone">
+        </label>
+        <label>How
+          <select id="valid">
+            <option value="10m">Scan the code now (valid 10 minutes)</option>
+            <option value="1d">Send a pairing file (valid 1 day)</option>
+            <option value="7d">Send a pairing file (valid 7 days)</option>
+          </select>
+        </label>
+        <div class="row"><button type="submit">Create invitation</button><span class="error" id="invite-error" role="alert"></span></div>
+      </form>
+      <div id="invitation" hidden>
+        <div class="invite">
+          <img id="qr" alt="Pairing QR code" width="256" height="256">
+          <div>
+            <p><b id="inv-for"></b></p>
+            <p class="muted small">In the Minstrel app: <b>Add home</b>, then scan this code, open the pairing file, or paste the link.
+              It works once, until <span id="inv-expires"></span>.</p>
+            <div class="row wrap-row">
+              <button id="download">Download pairing file</button>
+              <button id="copy" class="ghost">Copy link</button>
+              <button id="done" class="ghost">Done</button>
+            </div>
+            <p class="muted small">Code <code id="inv-code"></code></p>
+            <p class="note small">Anyone with this code or file can pair until it's used. Send it privately, and cancel it below if it goes astray.</p>
+          </div>
+        </div>
+      </div>
+      <h3>Waiting to be used</h3>
+      <table class="list"><thead><tr><th>For</th><th>Created</th><th>Expires</th><th></th></tr></thead>
+        <tbody id="invitations"></tbody></table>
+      <p class="muted small empty" id="no-invitations">None.</p>
+    </section>
+
+    <section class="card">
+      <h2>Paired devices</h2>
+      <table class="list"><thead><tr><th>Device</th><th>Paired</th><th>Last access</th><th>From</th><th></th></tr></thead>
+        <tbody id="devices"></tbody></table>
+      <p class="muted small empty" id="no-devices">No devices yet.</p>
+    </section>
+
+    <section class="card">
+      <div class="bar">
+        <h2>Media servers</h2>
+        <button id="refresh" class="ghost">Scan now</button>
+      </div>
+      <table class="list"><thead><tr><th>Name</th><th>Model</th><th>Address</th></tr></thead>
+        <tbody id="servers"></tbody></table>
+      <p class="muted small empty" id="no-servers">None found yet. Discovery runs every minute.</p>
+      <details>
+        <summary>Add servers discovery misses</summary>
+        <p class="muted small">Description URLs, one per line, e.g. <code>http://192.168.1.9:9791/…/desc.xml</code>.</p>
+        <form id="servers-form">
+          <textarea id="manual" rows="2" spellcheck="false" autocapitalize="off"></textarea>
+          <p class="note" id="servers-locked" hidden>Set by <code>-servers</code> / <code>LAUNCHPAD_SERVERS</code>.</p>
+          <div class="row"><button type="submit" id="servers-save">Save</button><span class="error" id="servers-error" role="alert"></span></div>
+        </form>
+      </details>
+    </section>
+
+    <p class="muted small foot">Certificate fingerprint <code id="fingerprint"></code></p>
+  </div>
+</main>
+</body>
+</html>
