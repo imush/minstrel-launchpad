@@ -125,3 +125,7 @@ can tell that apart from the launchpad itself being unreachable.
     make build
     make dist      # all platforms, into dist/
     make docker
+
+## License
+
+BSD 3-Clause; see [LICENSE](LICENSE).
