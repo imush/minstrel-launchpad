@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -75,7 +77,10 @@ type Transcoder struct {
 	MaxAge   time.Duration
 
 	slots chan struct{}
-	mu    sync.Mutex
+	mu    sync.Mutex // for trim
+
+	jobsMu sync.Mutex
+	jobs   map[string]*job // in progress, by key
 }
 
 // New finds ffmpeg (a path, or a name looked up in PATH) and keeps up to
@@ -94,6 +99,7 @@ func New(ffmpeg, dir string, parallel int, cacheBytes int64, log *slog.Logger) *
 		ffmpeg: path, dir: dir, log: log,
 		MaxBytes: cacheBytes, MaxAge: 7 * 24 * time.Hour,
 		slots: make(chan struct{}, max(parallel, 1)),
+		jobs:  map[string]*job{},
 	}
 	t.trim()
 	return t
@@ -119,6 +125,23 @@ func (t *Transcoder) Cached(key string) (*os.File, bool) {
 	return f, true
 }
 
+// Running returns the conversion under key that is still in progress, to
+// read from the start: a phone that lost its connection asks again while
+// the first request's conversion carries on.
+func (t *Transcoder) Running(key string) (io.ReadCloser, bool) {
+	t.jobsMu.Lock()
+	defer t.jobsMu.Unlock()
+	j := t.jobs[key]
+	if j == nil {
+		return nil, false
+	}
+	f, err := os.Open(j.tmp.Name())
+	if err != nil {
+		return nil, false
+	}
+	return &follower{j: j, f: f}, true
+}
+
 // Start converts src to profile, returning the output as it is produced.
 // It returns false when all conversion slots are busy; the caller then
 // serves the original. The conversion carries on to the end when the
@@ -140,7 +163,16 @@ func (t *Transcoder) Start(src io.ReadCloser, profile, key string) (io.ReadClose
 		t.log.Error("transcode cache", "err", err)
 		return nil, false
 	}
-	// A track takes minutes at most; this only stops a stuck ffmpeg.
+	reader, err := os.Open(tmp.Name())
+	if err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		<-t.slots
+		t.log.Error("transcode cache", "err", err)
+		return nil, false
+	}
+	// A conversion runs at up to 4 times playback speed, whatever the
+	// listener does, so this is ample; it only stops a stuck ffmpeg.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	cmd := exec.CommandContext(ctx, t.ffmpeg,
 		"-hide_banner", "-loglevel", "error", "-nostdin",
@@ -160,19 +192,29 @@ func (t *Transcoder) Start(src io.ReadCloser, profile, key string) (io.ReadClose
 			cmd.Stderr = &stderr
 			if err = cmd.Start(); err == nil {
 				lowPriority(cmd.Process.Pid)
-				pr, pw := io.Pipe()
+				j := &job{tmp: tmp}
+				j.cond = sync.NewCond(&j.mu)
+				t.jobsMu.Lock()
+				t.jobs[key] = j
+				t.jobsMu.Unlock()
 				go func() {
-					// Feed ffmpeg; it stops reading on errors.
-					_, _ = io.Copy(stdin, src)
+					// Feed ffmpeg. A source that breaks off (the media server
+					// hung up) must not end as a complete, shorter track:
+					// stop ffmpeg so the conversion fails instead.
+					_, _ = io.Copy(stdin, readErrors{src, &j.srcErr})
+					if j.srcErr.Load() != nil {
+						cancel()
+					}
 					stdin.Close()
 					src.Close()
 				}()
-				go t.collect(cmd, cancel, out, tmp, pw, key, &stderr)
-				return pr, true
+				go t.collect(cmd, cancel, out, j, key, &stderr)
+				return &follower{j: j, f: reader}, true
 			}
 		}
 	}
 	cancel()
+	reader.Close()
 	tmp.Close()
 	os.Remove(tmp.Name())
 	<-t.slots
@@ -180,24 +222,102 @@ func (t *Transcoder) Start(src io.ReadCloser, profile, key string) (io.ReadClose
 	return nil, false
 }
 
-// collect copies ffmpeg's output to the client, while there is one, and to
-// the cache file; a complete conversion is kept under key.
-func (t *Transcoder) collect(cmd *exec.Cmd, cancel context.CancelFunc, out io.Reader, tmp *os.File, client *io.PipeWriter, key string, stderr *strings.Builder) {
+// job is one conversion in progress: ffmpeg's output goes to tmp, and
+// listeners read it from there behind it, at their own pace. ffmpeg so
+// never waits on a slow or vanished listener, nor the media server on it.
+type job struct {
+	tmp    *os.File
+	srcErr atomic.Pointer[error]
+
+	mu   sync.Mutex
+	cond *sync.Cond
+	size int64
+	done bool
+	err  error // why the conversion failed; nil when it completed
+}
+
+func (j *job) wrote(n int) {
+	j.mu.Lock()
+	j.size += int64(n)
+	j.mu.Unlock()
+	j.cond.Broadcast()
+}
+
+func (j *job) finish(err error) {
+	j.mu.Lock()
+	j.done, j.err = true, err
+	j.mu.Unlock()
+	j.cond.Broadcast()
+}
+
+// readErrors notes the first read error other than the end of the source.
+type readErrors struct {
+	r   io.Reader
+	err *atomic.Pointer[error]
+}
+
+func (r readErrors) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	if err != nil && err != io.EOF {
+		r.err.CompareAndSwap(nil, &err)
+	}
+	return n, err
+}
+
+// follower reads a conversion as it is written, waiting for more until it
+// completes; a failed conversion ends in an error, never a short track.
+type follower struct {
+	j      *job
+	f      *os.File
+	pos    int64
+	closed bool
+}
+
+func (r *follower) Read(p []byte) (int, error) {
+	j := r.j
+	j.mu.Lock()
+	for r.pos >= j.size && !j.done && !r.closed {
+		j.cond.Wait()
+	}
+	size, done, err, closed := j.size, j.done, j.err, r.closed
+	j.mu.Unlock()
+	if closed {
+		return 0, os.ErrClosed
+	}
+	if r.pos < size {
+		n, rerr := r.f.ReadAt(p[:min(int64(len(p)), size-r.pos)], r.pos)
+		r.pos += int64(n)
+		if rerr == io.EOF {
+			rerr = nil
+		}
+		return n, rerr
+	}
+	if done && err != nil {
+		return 0, err
+	}
+	return 0, io.EOF
+}
+
+func (r *follower) Close() error {
+	r.j.mu.Lock()
+	r.closed = true
+	r.j.mu.Unlock()
+	r.j.cond.Broadcast()
+	return r.f.Close()
+}
+
+// collect writes ffmpeg's output to the job's file for listeners to
+// follow; a complete conversion is kept under key.
+func (t *Transcoder) collect(cmd *exec.Cmd, cancel context.CancelFunc, out io.Reader, j *job, key string, stderr *strings.Builder) {
 	defer func() { <-t.slots }()
 	defer cancel()
 	buf := make([]byte, 64<<10)
-	gone := false
 	var werr error
 	for {
 		n, err := out.Read(buf)
-		if n > 0 {
-			if werr == nil {
-				_, werr = tmp.Write(buf[:n])
-			}
-			if !gone {
-				if _, err := client.Write(buf[:n]); err != nil {
-					gone = true // the listener left; finish for the cache
-				}
+		if n > 0 && werr == nil {
+			if _, werr = j.tmp.Write(buf[:n]); werr == nil {
+				j.wrote(n)
 			}
 		}
 		if err != nil {
@@ -205,22 +325,29 @@ func (t *Transcoder) collect(cmd *exec.Cmd, cancel context.CancelFunc, out io.Re
 		}
 	}
 	err := cmd.Wait()
-	tmp.Close()
-	if err == nil && werr == nil {
-		if err := os.Rename(tmp.Name(), filepath.Join(t.dir, key+".aac")); err == nil {
-			t.trim()
-			client.Close()
-			return
-		}
+	j.tmp.Close()
+	if p := j.srcErr.Load(); p != nil {
+		err = fmt.Errorf("reading the source: %w", *p)
 	}
-	os.Remove(tmp.Name())
-	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		t.log.Warn("transcoding failed", "err", err, "ffmpeg", msg)
-		client.CloseWithError(errors.New("transcoding failed"))
+	if err == nil && werr != nil {
+		err = werr
+	}
+	// From here a new request finds the conversion kept, or starts again;
+	// never neither nor both.
+	t.jobsMu.Lock()
+	if err == nil {
+		err = os.Rename(j.tmp.Name(), filepath.Join(t.dir, key+".aac"))
+	}
+	delete(t.jobs, key)
+	t.jobsMu.Unlock()
+	if err == nil {
+		j.finish(nil)
+		t.trim()
 		return
 	}
-	client.Close()
+	os.Remove(j.tmp.Name())
+	t.log.Warn("transcoding failed", "err", err, "ffmpeg", strings.TrimSpace(stderr.String()))
+	j.finish(errors.New("transcoding failed"))
 }
 
 // trim drops conversions past MaxAge, then the least recently used until

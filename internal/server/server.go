@@ -11,6 +11,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -221,6 +222,15 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request) {
 				http.ServeContent(w, r, "", time.Time{}, f)
 				return
 			}
+			// Still converting for an earlier request that dropped out:
+			// follow that one rather than start over.
+			if out, ok := h.Transcoder.Running(key); ok {
+				defer out.Close()
+				w.Header().Set("Content-Type", transcode.ContentType)
+				w.Header().Set("X-Minstrel-Transcoded", profile)
+				streamTo(w, out)
+				return
+			}
 		}
 	}
 
@@ -252,6 +262,10 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request) {
 				// The whole file is converted; a range of it is no use.
 				pr.Out.Header.Del("Range")
 				pr.Out.Header.Del("If-Range")
+				// A conversion carries on for the cache when the listener
+				// drops out, as phones on mobile data do, so the file is
+				// read to the end whatever happens to this request.
+				pr.Out = pr.Out.WithContext(context.WithoutCancel(pr.Out.Context()))
 			}
 			rewrite.Headers(pr.Out.Header, rewrite.ToLAN)
 		},
@@ -336,4 +350,26 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// streamTo copies a conversion to the client as it is made. One that fails
+// aborts the connection, so the client sees an error and not a short file.
+func streamTo(w http.ResponseWriter, r io.Reader) {
+	rc := http.NewResponseController(w)
+	buf := make([]byte, 32<<10)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+			_ = rc.Flush()
+		}
+		if err == io.EOF {
+			return
+		}
+		if err != nil {
+			panic(http.ErrAbortHandler)
+		}
+	}
 }

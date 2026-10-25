@@ -1,6 +1,9 @@
 package transcode
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -52,5 +55,137 @@ func TestTrimKeepsRecentWithinSize(t *testing.T) {
 	want := []string{"b.aac", "c.aac", "partial-2"}
 	if len(left) != len(want) || left[0] != want[0] || left[1] != want[1] || left[2] != want[2] {
 		t.Errorf("left %v, want %v", left, want)
+	}
+}
+
+// fakeFFmpeg passes its input through, which is all these tests need.
+func fakeFFmpeg(t *testing.T) *Transcoder {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec cat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tr := New(bin, filepath.Join(t.TempDir(), "cache"), 2, 1<<20, slog.New(slog.DiscardHandler))
+	if tr == nil {
+		t.Fatal("no transcoder")
+	}
+	return tr
+}
+
+// source yields data, then fails with err (nil: ends normally).
+type source struct {
+	r   io.Reader
+	err error
+}
+
+func (s *source) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	if err == io.EOF && s.err != nil {
+		return n, s.err
+	}
+	return n, err
+}
+
+func (s *source) Close() error { return nil }
+
+func waitCached(t *testing.T, tr *Transcoder, key string) []byte {
+	t.Helper()
+	for range 200 {
+		if f, ok := tr.Cached(key); ok {
+			defer f.Close()
+			b, _ := io.ReadAll(f)
+			return b
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil
+}
+
+func TestConversionCompletes(t *testing.T) {
+	tr := fakeFFmpeg(t)
+	data := bytes.Repeat([]byte("music "), 50000)
+	out, ok := tr.Start(&source{r: bytes.NewReader(data)}, "aac-256", "k1")
+	if !ok {
+		t.Fatal("not started")
+	}
+	got, err := io.ReadAll(out)
+	out.Close()
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("read %d bytes, err %v; want %d", len(got), err, len(data))
+	}
+	if c := waitCached(t, tr, "k1"); !bytes.Equal(c, data) {
+		t.Errorf("cached %d bytes, want %d", len(c), len(data))
+	}
+}
+
+// A media server that hangs up mid-file must not produce a shorter track
+// that plays as if complete, nor one kept in the cache.
+func TestSourceBreakingOffFails(t *testing.T) {
+	tr := fakeFFmpeg(t)
+	data := bytes.Repeat([]byte("music "), 50000)
+	out, ok := tr.Start(&source{r: bytes.NewReader(data[:100000]), err: errors.New("connection reset")}, "aac-256", "k2")
+	if !ok {
+		t.Fatal("not started")
+	}
+	_, err := io.ReadAll(out)
+	out.Close()
+	if err == nil {
+		t.Fatal("a cut-short source read to a clean end")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, ok := tr.Cached("k2"); ok {
+		t.Error("cut-short conversion was cached")
+	}
+}
+
+// A listener that drops out (mobile data) leaves the conversion running, so
+// coming back finds it complete in the cache.
+func TestConversionOutlivesListener(t *testing.T) {
+	tr := fakeFFmpeg(t)
+	data := bytes.Repeat([]byte("music "), 50000)
+	out, ok := tr.Start(&source{r: bytes.NewReader(data)}, "aac-256", "k3")
+	if !ok {
+		t.Fatal("not started")
+	}
+	buf := make([]byte, 1000)
+	if _, err := io.ReadFull(out, buf); err != nil {
+		t.Fatal(err)
+	}
+	out.Close()
+	if c := waitCached(t, tr, "k3"); !bytes.Equal(c, data) {
+		t.Errorf("cached %d bytes, want %d", len(c), len(data))
+	}
+}
+
+// A phone that comes back while the conversion is still running follows it
+// from the start instead of starting a second one.
+func TestRunningJoinsConversion(t *testing.T) {
+	tr := fakeFFmpeg(t)
+	data := bytes.Repeat([]byte("music "), 50000)
+	pr, pw := io.Pipe()
+	out, ok := tr.Start(pr, "aac-256", "k4")
+	if !ok {
+		t.Fatal("not started")
+	}
+	_, _ = pw.Write(data[:100000])
+	out.Close() // the first listener drops out
+	again, ok := tr.Running("k4")
+	if !ok {
+		t.Fatal("conversion not found running")
+	}
+	go func() {
+		_, _ = pw.Write(data[100000:])
+		pw.Close()
+	}()
+	got, err := io.ReadAll(again)
+	again.Close()
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("read %d bytes, err %v; want %d", len(got), err, len(data))
+	}
+	if c := waitCached(t, tr, "k4"); !bytes.Equal(c, data) {
+		t.Errorf("cached %d bytes, want %d", len(c), len(data))
+	}
+	if _, ok := tr.Running("k4"); ok {
+		t.Error("still listed as running when done")
 	}
 }
