@@ -86,6 +86,7 @@ func (c *Console) Handler() http.Handler {
 	c.mux.HandleFunc("POST /api/invitations", c.authed(c.invite))
 	c.mux.HandleFunc("DELETE /api/invitations/{id}", c.authed(c.cancel))
 	c.mux.HandleFunc("DELETE /api/devices/{id}", c.authed(c.revoke))
+	c.mux.HandleFunc("PUT /api/devices/{id}", c.authed(c.updateDevice))
 	return http.HandlerFunc(c.serve)
 }
 
@@ -246,14 +247,16 @@ func (c *Console) state(w http.ResponseWriter, r *http.Request) {
 		devices = append(devices, device{Device: d})
 	}
 	type invitation struct {
-		ID      string    `json:"id"`
-		Label   string    `json:"label,omitempty"`
-		Created time.Time `json:"created"`
-		Expires time.Time `json:"expires"`
+		ID        string    `json:"id"`
+		Label     string    `json:"label,omitempty"`
+		Share     bool      `json:"share,omitempty"`
+		InvitedBy string    `json:"invitedBy,omitempty"`
+		Created   time.Time `json:"created"`
+		Expires   time.Time `json:"expires"`
 	}
 	invitations := []invitation{}
 	for _, inv := range c.Store.Invitations() {
-		invitations = append(invitations, invitation{inv.ID, inv.Label, inv.Created, inv.Expires})
+		invitations = append(invitations, invitation{inv.ID, inv.Label, inv.Share, inv.InvitedBy, inv.Created, inv.Expires})
 	}
 	set, err := c.Settings.Load()
 	if err != nil {
@@ -393,7 +396,10 @@ var validFor = map[string]time.Duration{
 }
 
 func (c *Console) invite(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Label, Valid string }
+	var req struct {
+		Label, Valid string
+		Share        bool
+	}
 	if !readJSON(w, r, &req) {
 		return
 	}
@@ -401,7 +407,7 @@ func (c *Console) invite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		ttl = validFor["10m"]
 	}
-	inv, err := c.Pairing.New(req.Label, ttl)
+	inv, err := c.Pairing.New(req.Label, ttl, auth.InviteOptions{Share: req.Share})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -411,7 +417,8 @@ func (c *Console) invite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	c.Log.Info("invitation created", "id", inv.ID, "label", inv.Label, "expires", inv.Expires.Format(time.RFC3339))
+	c.Log.Info("invitation created", "id", inv.ID, "label", inv.Label, "share", req.Share,
+		"expires", inv.Expires.Format(time.RFC3339))
 	writeJSON(w, map[string]any{
 		"id":        inv.ID,
 		"label":     inv.Label,
@@ -433,6 +440,19 @@ func (c *Console) revoke(w http.ResponseWriter, r *http.Request) {
 	ok, err := c.Store.Revoke(r.PathValue("id"))
 	if ok {
 		c.Log.Info("device revoked on the console", "id", r.PathValue("id"))
+	}
+	respond(w, ok, err)
+}
+
+// updateDevice lets a device invite others from the app, or stops it.
+func (c *Console) updateDevice(w http.ResponseWriter, r *http.Request) {
+	var req struct{ Share bool }
+	if !readJSON(w, r, &req) {
+		return
+	}
+	ok, err := c.Store.SetShare(r.PathValue("id"), req.Share)
+	if ok {
+		c.Log.Info("device access changed on the console", "id", r.PathValue("id"), "share", req.Share)
 	}
 	respond(w, ok, err)
 }

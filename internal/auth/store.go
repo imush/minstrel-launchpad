@@ -5,6 +5,11 @@
 // long random token of its own, so a photo of a used QR code or an old file
 // is useless and each device can be revoked alone. Only hashes of codes and
 // tokens are kept.
+//
+// Devices either listen, or also share: a sharing device can invite others
+// from the app while away from home. Those invitations only ever make
+// listening devices, and a sharing device can revoke only the devices it
+// invited; making a device a sharer is for the console, at home.
 package auth
 
 import (
@@ -35,7 +40,9 @@ type Device struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	TokenHash string    `json:"tokenHash"`
-	Label     string    `json:"label,omitempty"` // from the invitation it was paired with
+	Label     string    `json:"label,omitempty"`     // from the invitation it was paired with
+	Share     bool      `json:"share,omitempty"`     // may invite others from the app
+	InvitedBy string    `json:"invitedBy,omitempty"` // the device whose invitation it used; empty for the console
 	Created   time.Time `json:"created"`
 	LastSeen  time.Time `json:"lastSeen,omitzero"`
 	LastAddr  string    `json:"lastAddr,omitempty"` // IP it last connected from
@@ -43,11 +50,19 @@ type Device struct {
 
 // Invitation is a pairing code not yet used.
 type Invitation struct {
-	ID       string    `json:"id"`
-	Label    string    `json:"label,omitempty"` // who it's for, shown on the console
-	CodeHash string    `json:"codeHash"`
-	Created  time.Time `json:"created"`
-	Expires  time.Time `json:"expires"`
+	ID        string    `json:"id"`
+	Label     string    `json:"label,omitempty"`     // who it's for, shown on the console
+	Share     bool      `json:"share,omitempty"`     // the device paired with it may invite others
+	InvitedBy string    `json:"invitedBy,omitempty"` // the device that made it; empty for the console
+	CodeHash  string    `json:"codeHash"`
+	Created   time.Time `json:"created"`
+	Expires   time.Time `json:"expires"`
+}
+
+// InviteOptions say what an invitation grants and who made it.
+type InviteOptions struct {
+	Share     bool
+	InvitedBy string
 }
 
 // Store keeps paired devices and pending invitations in a JSON file.
@@ -86,21 +101,23 @@ func Open(path string) (*Store, error) {
 
 // NewCode creates a one-time pairing code valid for ttl.
 func (s *Store) NewCode(ttl time.Duration) (string, time.Time) {
-	code, inv, _ := s.Invite("", ttl)
+	code, inv, _ := s.Invite("", ttl, InviteOptions{})
 	return code, inv.Expires
 }
 
 // Invite creates a one-time pairing code valid for ttl, labelled with who
 // it's for. Only its hash is kept, so the code can't be shown again.
-func (s *Store) Invite(label string, ttl time.Duration) (string, Invitation, error) {
+func (s *Store) Invite(label string, ttl time.Duration, opt InviteOptions) (string, Invitation, error) {
 	code := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(random(16)))
 	now := time.Now().UTC().Truncate(time.Second)
 	inv := &Invitation{
-		ID:       hex.EncodeToString(random(4)),
-		Label:    cleanName(label, ""),
-		CodeHash: hash(code),
-		Created:  now,
-		Expires:  time.Now().Add(ttl),
+		ID:        hex.EncodeToString(random(4)),
+		Label:     cleanName(label, ""),
+		Share:     opt.Share,
+		InvitedBy: opt.InvitedBy,
+		CodeHash:  hash(code),
+		Created:   now,
+		Expires:   time.Now().Add(ttl),
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -126,10 +143,18 @@ func (s *Store) Invitations() []Invitation {
 }
 
 // Cancel withdraws an invitation, reporting whether there was one.
-func (s *Store) Cancel(id string) (bool, error) {
+func (s *Store) Cancel(id string) (bool, error) { return s.cancel(id, nil) }
+
+// CancelFor withdraws an invitation the device by made, reporting whether
+// there was one.
+func (s *Store) CancelFor(id, by string) (bool, error) { return s.cancel(id, &by) }
+
+func (s *Store) cancel(id string, by *string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	i := slices.IndexFunc(s.invitations, func(inv *Invitation) bool { return inv.ID == id })
+	i := slices.IndexFunc(s.invitations, func(inv *Invitation) bool {
+		return inv.ID == id && (by == nil || inv.InvitedBy == *by)
+	})
 	if i < 0 {
 		return false, nil
 	}
@@ -163,6 +188,8 @@ func (s *Store) Pair(code, name string) (string, Device, error) {
 		ID:        hex.EncodeToString(random(4)),
 		Name:      cleanName(name, "device"),
 		Label:     inv.Label,
+		Share:     inv.Share,
+		InvitedBy: inv.InvitedBy,
 		TokenHash: hash(token),
 		Created:   time.Now().UTC().Truncate(time.Second),
 	}
@@ -212,15 +239,43 @@ func (s *Store) Devices() []Device {
 }
 
 // Revoke removes the device with id, reporting whether there was one.
-func (s *Store) Revoke(id string) (bool, error) {
+func (s *Store) Revoke(id string) (bool, error) { return s.revoke(id, nil) }
+
+// RevokeFor removes the device with id if the device by invited it,
+// reporting whether there was one.
+func (s *Store) RevokeFor(id, by string) (bool, error) { return s.revoke(id, &by) }
+
+func (s *Store) revoke(id string, by *string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.devices, func(d *Device) bool {
+		return d.ID == id && (by == nil || d.InvitedBy == *by)
+	})
+	if i < 0 {
+		return false, nil
+	}
+	s.devices = slices.Delete(s.devices, i, i+1)
+	return true, s.save()
+}
+
+// SetShare lets the device with id invite others, or stops it, reporting
+// whether there was one.
+func (s *Store) SetShare(id string, share bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	i := slices.IndexFunc(s.devices, func(d *Device) bool { return d.ID == id })
 	if i < 0 {
 		return false, nil
 	}
-	s.devices = slices.Delete(s.devices, i, i+1)
-	return true, s.save()
+	if s.devices[i].Share == share {
+		return true, nil
+	}
+	s.devices[i].Share = share
+	if err := s.save(); err != nil {
+		s.devices[i].Share = !share
+		return false, err
+	}
+	return true, nil
 }
 
 // Flush saves last-seen times, which are kept in memory between saves.

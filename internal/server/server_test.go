@@ -237,7 +237,7 @@ func TestInvitation(t *testing.T) {
 	p := &Pairing{Fingerprint: "abc", Port: "8443", Store: store}
 	p.SetName("My NAS")
 	p.SetPublic([]string{"home.example.net", "203.0.113.5:443"})
-	inv, err := p.New("", time.Minute)
+	inv, err := p.New("", time.Minute, auth.InviteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

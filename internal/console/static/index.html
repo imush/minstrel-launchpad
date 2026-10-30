@@ -107,6 +107,9 @@
             <option value="7d">Send a pairing file (valid 7 days)</option>
           </select>
         </label>
+        <label class="check"><input id="share" type="checkbox"> Can invite others from the app
+          <span class="muted small">For your own phone: lets it invite people while you're away. They can only listen.</span>
+        </label>
         <div class="row"><button type="submit">Create invitation</button><span class="error" id="invite-error" role="alert"></span></div>
       </form>
       <div id="invitation" hidden>
@@ -134,7 +137,7 @@
 
     <section class="card">
       <h2>Paired devices</h2>
-      <table class="list"><thead><tr><th>Device</th><th>Paired</th><th>Last access</th><th>From</th><th></th></tr></thead>
+      <table class="list"><thead><tr><th>Device</th><th>Access</th><th>Paired</th><th>Last access</th><th>From</th><th></th></tr></thead>
         <tbody id="devices"></tbody></table>
       <p class="muted small empty" id="no-devices">No devices yet.</p>
     </section>

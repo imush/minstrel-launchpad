@@ -225,7 +225,7 @@ func TestSettings(t *testing.T) {
 	if got := e.pairing.Public(); !slices.Equal(got, want) {
 		t.Errorf("public %v", got)
 	}
-	inv, _ := e.pairing.New("", 60e9)
+	inv, _ := e.pairing.New("", 60e9, auth.InviteOptions{})
 	if !strings.Contains(inv.URI, "a=myhome.example.net%3A443") {
 		t.Errorf("new address not in invitations: %s", inv.URI)
 	}
@@ -246,7 +246,7 @@ func TestSettings(t *testing.T) {
 	if rec := e.do("PUT", "/api/settings", `{"name":"  Lake   house "}`); rec.Code != 200 || e.pairing.Name() != "Lake house" {
 		t.Errorf("name: %d %q", rec.Code, e.pairing.Name())
 	}
-	if inv, _ := e.pairing.New("", 60e9); !strings.Contains(inv.URI, "n=Lake+house") {
+	if inv, _ := e.pairing.New("", 60e9, auth.InviteOptions{}); !strings.Contains(inv.URI, "n=Lake+house") {
 		t.Errorf("new name not in invitations: %s", inv.URI)
 	}
 	for _, bad := range []string{`{"name":"   "}`, `{"name":"` + strings.Repeat("x", 41) + `"}`, `{"name":"a\u0007b"}`} {
@@ -337,7 +337,7 @@ func TestSatelliteHostsOnceEnrolled(t *testing.T) {
 	}
 	pairing := &server.Pairing{Fingerprint: "fp", Port: "7443", Relays: sat.Hosts}
 	pairing.Store, _ = auth.Open(filepath.Join(t.TempDir(), "devices.json"))
-	inv, err := pairing.New("", 60e9)
+	inv, err := pairing.New("", 60e9, auth.InviteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

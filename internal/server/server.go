@@ -4,6 +4,7 @@
 //	POST /api/pair        {code, name} → {token, device}; the only open endpoint
 //	GET  /api/info        launchpad name, version, addresses (direct and relay), and the media servers
 //	POST /api/refresh     scan the LAN now
+//	*    /api/devices, /api/invitations: inviting others, for devices allowed to (sharing.go)
 //	*    /u/<ip:port>/... relay to a media server, with URLs rewritten
 //
 // Requests without a token get a bare 404, so scanners learn nothing.
@@ -109,6 +110,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.sharing(w, r, dev) {
+		return
+	}
 	switch {
 	case r.URL.Path == "/api/info" && r.Method == http.MethodGet:
 		h.info(w, r, dev)
@@ -181,7 +185,7 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request, dev auth.Device) 
 	info := map[string]any{
 		"name":    h.Pairing.Name(),
 		"version": h.Version,
-		"device":  map[string]string{"id": dev.ID, "name": dev.Name},
+		"device":  map[string]any{"id": dev.ID, "name": dev.Name, "share": dev.Share},
 		"servers": servers,
 		// What the app may ask for in X-Minstrel-Transcode; none without ffmpeg.
 		"transcode": []string{},

@@ -87,11 +87,11 @@ func TestKey(t *testing.T) {
 func TestInvitations(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "devices.json")
 	s, _ := Open(path)
-	code, inv, err := s.Invite("Anna's iPad", 24*time.Hour)
+	code, inv, err := s.Invite("Anna's iPad", 24*time.Hour, InviteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, _, _ := s.Invite("", time.Hour)
+	other, _, _ := s.Invite("", time.Hour, InviteOptions{})
 
 	// Survives a restart, without the code in clear.
 	s2, _ := Open(path)

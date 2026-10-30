@@ -71,10 +71,23 @@ A web page on port 7444, for the home network only:
 - **Pair a device**: an invitation as a QR code to scan now (valid ten
   minutes), or a pairing file to send (valid a day or a week), opened in
   the app with Add home → Open pairing file. Label it with who it's for.
-  Unused invitations are listed and can be cancelled.
-- **Paired devices**: name, when paired, last access and from which
-  address; revoke any of them.
+  Unused invitations are listed and can be cancelled. Tick *Can invite
+  others* for your own phone (see below).
+- **Paired devices**: name, access, who invited it, when paired, last
+  access and from which address; revoke any of them.
 - **Media servers**: what discovery found, and servers to add by hand.
+
+### Inviting people while away
+
+Devices either **listen**, or also **share**: a sharing device can invite
+people from the app (the home's menu → Invite someone), wherever it is,
+with a QR code or a pairing file sent through any messaging app. Its
+invitations make listening devices only, so access can't spread further.
+In the app it sees every paired device, and can revoke the ones it
+invited; the rest is for the console. Only the console, at home, makes a
+device a sharer: tick *Can invite others* on its invitation, or *Allow
+inviting* on a device already paired. The first device paired with a new
+launchpad shares.
 
 An invitation carries a one-time code, not a token: the app exchanges the
 code for its own token when it pairs, so a used QR code or file is
@@ -92,8 +105,10 @@ router forwards. Forgot the password:
 The same things from the command line:
 
     minstrel-launchpad pair            # docker exec launchpad /minstrel-launchpad pair
+    minstrel-launchpad pair -share     # the paired device may invite others
     minstrel-launchpad devices         # list paired devices
     minstrel-launchpad revoke <id>     # unpair one
+    minstrel-launchpad share <id>      # let a paired device invite others; unshare to stop
     minstrel-launchpad status          # addresses, certificate pin, servers
 
 ### Flags

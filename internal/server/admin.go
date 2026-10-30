@@ -72,8 +72,8 @@ type Invitation struct {
 }
 
 // New creates an invitation valid for ttl, for the device or person label.
-func (p *Pairing) New(label string, ttl time.Duration) (Invitation, error) {
-	code, inv, err := p.Store.Invite(label, ttl)
+func (p *Pairing) New(label string, ttl time.Duration, opt auth.InviteOptions) (Invitation, error) {
+	code, inv, err := p.Store.Invite(label, ttl, opt)
 	if err != nil {
 		return Invitation{}, err
 	}
@@ -138,7 +138,9 @@ type Admin struct {
 func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/pair" && r.Method == http.MethodPost:
-		inv, err := a.Pairing.New(r.URL.Query().Get("label"), 10*time.Minute)
+		inv, err := a.Pairing.New(r.URL.Query().Get("label"), 10*time.Minute, auth.InviteOptions{
+			Share: r.URL.Query().Get("share") == "1",
+		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -155,6 +157,16 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, a.Store.Devices())
 	case r.URL.Path == "/revoke" && r.Method == http.MethodPost:
 		ok, err := a.Store.Revoke(r.URL.Query().Get("id"))
+		switch {
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		case !ok:
+			http.Error(w, "no such device", http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	case r.URL.Path == "/share" && r.Method == http.MethodPost:
+		ok, err := a.Store.SetShare(r.URL.Query().Get("id"), r.URL.Query().Get("on") == "1")
 		switch {
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusInternalServerError)

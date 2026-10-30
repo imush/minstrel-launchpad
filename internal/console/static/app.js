@@ -135,6 +135,26 @@ function button(text, onClick) {
   return td;
 }
 
+// A device's name from its id, for "invited by"; it may since be revoked.
+function deviceName(s, id) {
+  return s.devices.find((d) => d.id === id)?.name ?? 'a removed device';
+}
+
+// Listen, or Share: may invite others (who can only listen) from the app.
+function accessCell(d) {
+  const td = cell(d.share ? 'Listen and invite' : 'Listen', 'Access');
+  const b = document.createElement('button');
+  b.className = 'ghost small';
+  b.textContent = d.share ? 'Stop inviting' : 'Allow inviting';
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    await api('PUT', 'devices/' + d.id, { share: !d.share }).catch(alertError);
+    load();
+  });
+  td.append(' ', b);
+  return td;
+}
+
 function fill(tbody, empty, rows) {
   $(tbody).replaceChildren(...rows);
   $(empty).hidden = rows.length > 0;
@@ -168,7 +188,10 @@ function render(s) {
   fill('invitations', 'no-invitations', s.invitations.map((inv) => {
     const tr = document.createElement('tr');
     tr.append(
-      cell(inv.label || 'Anyone'),
+      cell(inv.label || 'Anyone', null, [
+        inv.share ? 'can invite others' : '',
+        inv.invitedBy ? 'from ' + deviceName(s, inv.invitedBy) : '',
+      ].filter(Boolean).join(' · ')),
       cell(dateFmt.format(new Date(inv.created)), 'Created'),
       cell(until(inv.expires), 'Expires'),
       button('Cancel', async (b) => {
@@ -186,7 +209,12 @@ function render(s) {
     const tr = document.createElement('tr');
     const from = d.lastAddr ? (isLAN(d.lastAddr) ? 'home network' : 'outside') : '';
     tr.append(
-      cell(d.name, null, [d.label && d.label !== d.name ? 'for ' + d.label : '', 'id ' + d.id].filter(Boolean).join(' · ')),
+      cell(d.name, null, [
+        d.label && d.label !== d.name ? 'for ' + d.label : '',
+        d.invitedBy ? 'invited by ' + deviceName(s, d.invitedBy) : '',
+        'id ' + d.id,
+      ].filter(Boolean).join(' · ')),
+      accessCell(d),
       cell(dateFmt.format(new Date(d.created)), 'Paired'),
       cell(ago(d.lastSeen), 'Last access', d.lastSeen ? timeFmt.format(new Date(d.lastSeen)) : ''),
       cell(d.lastAddr || '—', 'From', from),
@@ -330,13 +358,16 @@ $('invite-form').addEventListener('submit', async (e) => {
     $('invite-error').textContent = 'No outside address is set, so this device will only connect at home.';
   }
   try {
-    invitation = await api('POST', 'invitations', { label: $('label').value.trim(), valid: $('valid').value });
+    invitation = await api('POST', 'invitations', {
+      label: $('label').value.trim(), valid: $('valid').value, share: $('share').checked,
+    });
     $('qr').src = invitation.qr;
     $('inv-for').textContent = invitation.label ? 'For ' + invitation.label : 'For any device';
     $('inv-expires').textContent = timeFmt.format(new Date(invitation.expires));
     $('inv-code').textContent = invitation.code;
     $('invitation').hidden = false;
     $('label').value = '';
+    $('share').checked = false;
     load();
   } catch (x) {
     $('invite-error').textContent = x.message;

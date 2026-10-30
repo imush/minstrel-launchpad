@@ -42,10 +42,12 @@ const usage = `usage: minstrel-launchpad [command] [flags]
 
 commands:
   serve            run the launchpad (the default)
-  pair             show a QR code to pair the Minstrel app
+  pair             show a QR code to pair the Minstrel app (-share: it may invite others)
   console          print a link to set the console password
   devices          list paired devices
   revoke <id>      unpair a device
+  share <id>       let a device invite others from the app
+  unshare <id>     stop a device inviting others
   status           show addresses, certificate pin and media servers
   version          print the version
 
@@ -70,6 +72,10 @@ func main() {
 		err = devices(args)
 	case "revoke":
 		err = revoke(args)
+	case "share":
+		err = setShare(args, true)
+	case "unshare":
+		err = setShare(args, false)
 	case "status":
 		err = status(args)
 	case "version":
@@ -343,7 +349,8 @@ func serve(args []string) error {
 		}
 	}
 	if len(store.Devices()) == 0 {
-		if inv, err := pairing.New("", 30*time.Minute); err == nil {
+		// The first device is the owner's: it may invite others.
+		if inv, err := pairing.New("", 30*time.Minute, auth.InviteOptions{Share: true}); err == nil {
 			printInvitation(os.Stderr, inv)
 		}
 	}
@@ -426,9 +433,14 @@ func adminCall(data, method, path string, out any) error {
 func pair(args []string) error {
 	fs := flag.NewFlagSet("pair", flag.ExitOnError)
 	data := dataFlag(fs)
+	share := fs.Bool("share", false, "the paired device may invite others from the app")
 	_ = fs.Parse(args)
+	path := "/pair"
+	if *share {
+		path += "?share=1"
+	}
 	var inv server.Invitation
-	if err := adminCall(*data, http.MethodPost, "/pair", &inv); err != nil {
+	if err := adminCall(*data, http.MethodPost, path, &inv); err != nil {
 		return err
 	}
 	printInvitation(os.Stdout, inv)
@@ -462,13 +474,22 @@ func devices(args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tPAIRED\tLAST SEEN\tFROM")
+	fmt.Fprintln(tw, "ID\tNAME\tACCESS\tINVITED BY\tPAIRED\tLAST SEEN\tFROM")
 	for _, d := range list {
 		seen := "never"
 		if !d.LastSeen.IsZero() {
 			seen = d.LastSeen.Local().Format("2006-01-02 15:04")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", d.ID, d.Name, d.Created.Local().Format("2006-01-02"), seen, d.LastAddr)
+		access := "listen"
+		if d.Share {
+			access = "share"
+		}
+		by := d.InvitedBy
+		if by == "" {
+			by = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			d.ID, d.Name, access, by, d.Created.Local().Format("2006-01-02"), seen, d.LastAddr)
 	}
 	return tw.Flush()
 }
@@ -484,6 +505,26 @@ func revoke(args []string) error {
 		return err
 	}
 	fmt.Println("Revoked", fs.Arg(0))
+	return nil
+}
+
+func setShare(args []string, share bool) error {
+	name := map[bool]string{true: "share", false: "unshare"}[share]
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	data := dataFlag(fs)
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: minstrel-launchpad %s <device id>", name)
+	}
+	on := map[bool]string{true: "1", false: "0"}[share]
+	if err := adminCall(*data, http.MethodPost, "/share?id="+fs.Arg(0)+"&on="+on, nil); err != nil {
+		return err
+	}
+	if share {
+		fmt.Println(fs.Arg(0), "can now invite others from the app")
+	} else {
+		fmt.Println(fs.Arg(0), "can no longer invite others")
+	}
 	return nil
 }
 
