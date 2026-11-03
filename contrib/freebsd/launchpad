@@ -22,6 +22,10 @@ load_rc_config $name
 : ${launchpad_user:="launchpad"}
 : ${launchpad_data:="/var/db/launchpad"}
 
+# rc(8) hands down /sbin:/bin:/usr/sbin:/usr/bin, which leaves out where
+# ports put ffmpeg -- so compression would be off however it was installed.
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
+
 pidfile="/var/run/${name}/${name}.pid"
 program="/usr/local/bin/minstrel-launchpad"
 # The pid file holds daemon(8), which restarts the launchpad if it exits.
