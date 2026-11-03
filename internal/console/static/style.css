@@ -1,32 +1,45 @@
+/* The Minstrel palette, as on minstrelplayer.org. The console can't fetch
+   the site's webfonts -- its own CSP allows nothing off this box, and it
+   has to work with no internet at all -- so the brand carries in the
+   colours and the mark, with the system font underneath. */
 :root {
-  --bg: #f5f5f2;
+  --midnight: #14122b;
+  --indigo: #221f45;
+  --brass: #e8a84a;
+  --brass-dark: #b8731a;
+  --parchment: #f3ebdd;
+  --mist: #b9b3cf;
+
+  --bg: #f6f1e7;
   --card: #ffffff;
-  --text: #1d1d1b;
-  --muted: #6b6b66;
-  --line: #e2e1dc;
-  --accent: #3b5bdb;
-  --accent-text: #ffffff;
+  --text: #14122b;
+  --muted: #605b75;
+  --line: #e4dccb;
+  --accent: var(--indigo);
+  --accent-text: var(--parchment);
+  --link: var(--brass-dark);
   --error: #c92a2a;
-  --ok: #2f9e44;
-  --note-bg: #fff6e0;
+  --ok: #2f7a44;
+  --note-bg: #fdf1d8;
   --note-text: #6b4e00;
-  --code-bg: #efeee9;
+  --code-bg: #f0e9dc;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #161615;
-    --card: #20201f;
-    --text: #ecebe6;
-    --muted: #9b9a94;
-    --line: #34332f;
-    --accent: #7d95f5;
-    --accent-text: #10131f;
+    --bg: var(--midnight);
+    --card: #1c1a38;
+    --text: var(--parchment);
+    --muted: var(--mist);
+    --line: #2e2b52;
+    --accent: var(--brass);
+    --accent-text: var(--midnight);
+    --link: var(--brass);
     --error: #ff8787;
     --ok: #69db7c;
-    --note-bg: #352c12;
+    --note-bg: #312a16;
     --note-text: #f2d48a;
-    --code-bg: #2b2a27;
+    --code-bg: #262348;
     color-scheme: dark;
   }
 }
@@ -39,8 +52,22 @@ body {
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 .wrap { max-width: 860px; margin: 0 auto; padding: 0 16px; }
-header { border-bottom: 1px solid var(--line); background: var(--card); margin-bottom: 20px; }
+/* The header is the site's midnight band, in either colour scheme; the
+   hairline keeps it apart from the page when that is dark too. */
+header {
+  background: var(--midnight);
+  color: var(--parchment);
+  border-bottom: 1px solid rgba(243, 235, 221, 0.13);
+  margin-bottom: 20px;
+}
 header .wrap { padding-top: 14px; padding-bottom: 14px; }
+header h1 { color: var(--parchment); }
+header .sub { color: var(--mist); }
+header button.ghost { color: var(--parchment); border-color: rgba(243, 235, 221, 0.4); }
+header button.ghost:hover { color: var(--brass); border-color: var(--brass); }
+.brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.brand > div { min-width: 0; }
+.mark { width: 38px; height: 38px; flex: none; }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 h1 { font-size: 20px; margin: 0; }
 h2 { font-size: 17px; margin: 0 0 4px; }
@@ -89,7 +116,8 @@ button {
   color: var(--accent-text);
   cursor: pointer;
 }
-button.ghost { background: transparent; color: var(--accent); }
+button.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+button.ghost:hover { color: var(--link); border-color: var(--link); }
 button.danger { background: transparent; color: var(--error); border-color: transparent; padding: 4px 8px; }
 button:disabled { opacity: 0.5; cursor: default; }
 .row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
@@ -98,7 +126,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .grid .row { grid-column: 1 / -1; }
 .tabs { display: flex; gap: 4px; margin: 12px 0 4px; border-bottom: 1px solid var(--line); }
 .tab { background: none; color: var(--muted); border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 12px; }
-.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--brass); }
 fieldset { border: none; padding: 0; margin: 0; opacity: 0.6; }
 .invite { display: flex; gap: 20px; align-items: flex-start; margin-top: 16px; padding: 16px; border: 1px dashed var(--line); border-radius: 10px; }
 .invite img { background: #fff; border-radius: 8px; padding: 8px; flex: none; image-rendering: pixelated; }
@@ -121,7 +149,7 @@ table.list { width: 100%; border-collapse: collapse; font-size: 14px; }
 .warn::before { background: var(--muted); }
 #tc-details td:first-child { color: var(--muted); width: 130px; }
 details { margin-top: 14px; }
-summary { cursor: pointer; font-size: 14px; color: var(--accent); }
+summary { cursor: pointer; font-size: 14px; color: var(--link); }
 .foot { text-align: center; margin: 8px 0 32px; }
 @media (max-width: 600px) {
   .grid { grid-template-columns: 1fr; }

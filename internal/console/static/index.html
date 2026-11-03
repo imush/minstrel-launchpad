@@ -5,15 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Launchpad console</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 <script src="app.js" defer></script>
 </head>
 <body>
 <header>
   <div class="wrap bar">
-    <div>
-      <h1 id="title">Launchpad</h1>
-      <p class="sub" id="subtitle">minstrel-launchpad</p>
+    <div class="brand">
+      <!-- The Minstrel mark: a lyre whose strings are signal bars. -->
+      <svg class="mark" viewBox="0 0 120 120" role="img" aria-label="Minstrel">
+        <path d="M60 100 C 32 100, 22 80, 28 58 C 32 42, 27 30, 18 20" fill="none" stroke="#e8a84a" stroke-width="9" stroke-linecap="round"/>
+        <path d="M60 100 C 88 100, 98 80, 92 58 C 88 42, 93 30, 102 20" fill="none" stroke="#e8a84a" stroke-width="9" stroke-linecap="round"/>
+        <circle cx="18" cy="20" r="7" fill="#e8a84a"/>
+        <circle cx="102" cy="20" r="7" fill="#e8a84a"/>
+        <path d="M45 86 V77 M55 86 V67 M65 86 V57 M75 86 V47" fill="none" stroke="#f3ebdd" stroke-width="8" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <h1 id="title">Launchpad</h1>
+        <p class="sub" id="subtitle">minstrel-launchpad</p>
+      </div>
     </div>
     <button id="logout" class="ghost" hidden>Log out</button>
   </div>
