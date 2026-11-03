@@ -68,9 +68,10 @@ func Lossless(contentType string) bool {
 
 // Transcoder runs ffmpeg and keeps what it made.
 type Transcoder struct {
-	ffmpeg string
-	dir    string
-	log    *slog.Logger
+	ffmpeg  string
+	version string
+	dir     string
+	log     *slog.Logger
 	// MaxBytes and MaxAge bound the kept conversions.
 	// Zero MaxBytes keeps nothing.
 	MaxBytes int64
@@ -85,28 +86,74 @@ type Transcoder struct {
 
 // New finds ffmpeg (a path, or a name looked up in PATH) and keeps up to
 // cacheBytes of conversions in dir. At most parallel conversions run at
-// once. It returns nil when there is no ffmpeg.
-func New(ffmpeg, dir string, parallel int, cacheBytes int64, log *slog.Logger) *Transcoder {
+// once. It returns nil and says why when there is no usable ffmpeg; the
+// launchpad then sends lossless tracks as they are.
+func New(ffmpeg, dir string, parallel int, cacheBytes int64, log *slog.Logger) (*Transcoder, error) {
 	path, err := exec.LookPath(ffmpeg)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("no %s to compress with: %w", ffmpeg, err)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		log.Error("transcode cache", "err", err)
-		return nil
+		return nil, fmt.Errorf("cache directory: %w", err)
 	}
 	t := &Transcoder{
-		ffmpeg: path, dir: dir, log: log,
+		ffmpeg: path, version: ffmpegVersion(path, log), dir: dir, log: log,
 		MaxBytes: cacheBytes, MaxAge: 7 * 24 * time.Hour,
 		slots: make(chan struct{}, max(parallel, 1)),
 		jobs:  map[string]*job{},
 	}
 	t.trim()
-	return t
+	return t, nil
 }
 
 // Path is the ffmpeg in use.
 func (t *Transcoder) Path() string { return t.ffmpeg }
+
+// Version is how that ffmpeg names itself, e.g. "ffmpeg version 7.1".
+// Empty when it wouldn't say.
+func (t *Transcoder) Version() string { return t.version }
+
+// Jobs is how many conversions may run at once.
+func (t *Transcoder) Jobs() int { return cap(t.slots) }
+
+// CacheBytes is how much of the finished conversions is kept.
+func (t *Transcoder) CacheBytes() int64 { return t.MaxBytes }
+
+// Cache is what the kept conversions take on disk now, and how many there
+// are. Partial ones, still being written, don't count.
+func (t *Transcoder) Cache() (bytes int64, files int) {
+	entries, err := os.ReadDir(t.dir)
+	if err != nil {
+		return 0, 0
+	}
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil || !info.Mode().IsRegular() || strings.HasPrefix(e.Name(), "partial-") {
+			continue
+		}
+		bytes += info.Size()
+		files++
+	}
+	return bytes, files
+}
+
+// ffmpegVersion asks ffmpeg what it is, so the console can show it. One
+// that won't answer is still used; only the label goes missing.
+func ffmpegVersion(path string, log *slog.Logger) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "-version").Output()
+	if err != nil {
+		log.Debug("asking ffmpeg its version", "err", err)
+		return ""
+	}
+	// "ffmpeg version 7.1 Copyright (c) 2000-2024 the FFmpeg developers"
+	line, _, _ := strings.Cut(string(out), "\n")
+	if i := strings.Index(line, " Copyright"); i > 0 {
+		line = line[:i]
+	}
+	return strings.TrimSpace(line)
+}
 
 // Key names the conversion of the file at source to profile.
 func Key(source, profile string) string {

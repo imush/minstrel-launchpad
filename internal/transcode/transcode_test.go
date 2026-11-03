@@ -65,7 +65,10 @@ func fakeFFmpeg(t *testing.T) *Transcoder {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec cat\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	tr := New(bin, filepath.Join(t.TempDir(), "cache"), 2, 1<<20, slog.New(slog.DiscardHandler))
+	tr, err := New(bin, filepath.Join(t.TempDir(), "cache"), 2, 1<<20, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if tr == nil {
 		t.Fatal("no transcoder")
 	}

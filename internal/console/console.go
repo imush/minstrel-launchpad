@@ -47,10 +47,38 @@ type Registry interface {
 	SetManual([]string)
 }
 
+// Transcoding is what the launchpad can do with lossless audio, for the
+// console to show. The app asks for compression per track; without it the
+// original is sent instead, which is fine at home and dear on mobile data.
+type Transcoding struct {
+	// Available is false when ffmpeg is missing or compression was turned off.
+	Available bool `json:"available"`
+	// Reason says why, when it isn't available.
+	Reason string `json:"reason,omitempty"`
+	// FFmpeg is the binary in use, Version how it names itself.
+	FFmpeg  string `json:"ffmpeg,omitempty"`
+	Version string `json:"ffmpegVersion,omitempty"`
+	// Profiles are the bitrates the app may ask for.
+	Profiles []string `json:"profiles,omitempty"`
+	// Jobs is how many conversions run at once; past that the original is sent.
+	Jobs int `json:"jobs,omitempty"`
+	// CacheBytes bounds what is kept for replays and seeking.
+	CacheBytes int64 `json:"cacheBytes"`
+
+	// Cache reports what the kept conversions take now, and how many there
+	// are. Set by the caller; the console asks each time it draws.
+	Cache func() (int64, int) `json:"-"`
+	// Filled in from Cache for the page.
+	UsedBytes int64 `json:"usedBytes"`
+	Files     int   `json:"files"`
+}
+
 // Console serves the page and its JSON API.
 type Console struct {
 	Version     string
+	Build       string
 	Fingerprint string
+	Transcode   Transcoding
 	Pairing     *server.Pairing
 	Store       *auth.Store
 	Registry    Registry
@@ -270,10 +298,16 @@ func (c *Console) state(w http.ResponseWriter, r *http.Request) {
 	for _, ifc := range lan.IPv4() {
 		lanAddrs = append(lanAddrs, net.JoinHostPort(ifc.Addr.String(), c.Pairing.Port))
 	}
+	tc := c.Transcode
+	if tc.Cache != nil {
+		tc.UsedBytes, tc.Files = tc.Cache()
+	}
 	writeJSON(w, map[string]any{
 		"name":            c.Pairing.Name(),
 		"nameLocked":      c.NameLocked,
 		"version":         c.Version,
+		"build":           c.Build,
+		"transcode":       tc,
 		"fingerprint":     c.Fingerprint,
 		"port":            c.Pairing.Port,
 		"lan":             lanAddrs,

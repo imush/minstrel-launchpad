@@ -169,6 +169,7 @@ function render(s) {
   state = s;
   $('title').textContent = s.name;
   $('subtitle').textContent = 'minstrel-launchpad ' + s.version;
+  $('build').textContent = s.build || '';
   $('fingerprint').textContent = s.fingerprint;
   for (const el of document.querySelectorAll('.port')) el.textContent = s.port;
   $('lan').textContent = s.lan.length ? s.lan.join(', ') : 'no home-network address (check the network)';
@@ -228,6 +229,8 @@ function render(s) {
     return tr;
   }));
 
+  renderTranscoding(s.transcode || {});
+
   fill('servers', 'no-servers', s.servers.map((srv) => {
     const tr = document.createElement('tr');
     let addr = srv.location;
@@ -239,6 +242,46 @@ function render(s) {
     );
     return tr;
   }));
+}
+
+function size(bytes) {
+  if (!bytes) return '0';
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1) return Math.round(bytes / 1024) + ' kB';
+  return (mb < 10 ? mb.toFixed(1) : Math.round(mb)) + ' MB';
+}
+
+function renderTranscoding(tc) {
+  const state = $('tc-state');
+  state.className = tc.available ? 'ok' : 'warn';
+  state.textContent = tc.available
+    ? 'Available' + (tc.ffmpegVersion ? ' \u2014 ' + tc.ffmpegVersion : '')
+    : 'Not available' + (tc.reason ? ' \u2014 ' + tc.reason : '');
+
+  const rows = [];
+  const row = (k, v, sub) => {
+    const tr = document.createElement('tr');
+    tr.append(cell(k, null), cell(v, k, sub || ''));
+    rows.push(tr);
+  };
+  if (tc.available) {
+    if (tc.ffmpeg) row('ffmpeg', tc.ffmpeg);
+    if (tc.profiles?.length) {
+      row('Bitrates', tc.profiles.map((p) => p.replace('aac-', '') + 'k').join(', '),
+        'AAC; the app picks one');
+    }
+    row('At once', String(tc.jobs), 'beyond that the original is sent');
+    row('Kept', size(tc.usedBytes) + ' of ' + size(tc.cacheBytes),
+      tc.files === 1 ? '1 track' : tc.files + ' tracks');
+  }
+  $('tc-details').replaceChildren(...rows);
+  $('tc-table').hidden = rows.length === 0;
+  $('tc-note').textContent = tc.available
+    ? 'Set with -ffmpeg, -transcode-jobs and -transcode-cache (LAUNCHPAD_FFMPEG, '
+      + 'LAUNCHPAD_TRANSCODE_JOBS, LAUNCHPAD_TRANSCODE_CACHE).'
+    : tc.reason?.startsWith('turned off')
+      ? 'Drop -ffmpeg off to turn it back on.'
+      : 'Install ffmpeg and restart the launchpad, or point -ffmpeg (LAUNCHPAD_FFMPEG) at it.';
 }
 
 // Two-step buttons instead of browser dialogs: the first click asks.

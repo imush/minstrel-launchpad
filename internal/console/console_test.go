@@ -345,3 +345,34 @@ func TestSatelliteHostsOnceEnrolled(t *testing.T) {
 		t.Errorf("relay not in invitation: %s", inv.URI)
 	}
 }
+
+func TestTranscodingState(t *testing.T) {
+	e := setup(t)
+	e.login(t)
+
+	// Nothing set: the page says why, and shows no figures.
+	var off struct {
+		Transcode Transcoding `json:"transcode"`
+	}
+	json.Unmarshal(e.do("GET", "/api/state", "").Body.Bytes(), &off)
+	if off.Transcode.Available || off.Transcode.Jobs != 0 {
+		t.Errorf("want unavailable, got %+v", off.Transcode)
+	}
+
+	e.c.Transcode = Transcoding{
+		Available: true, FFmpeg: "/usr/bin/ffmpeg", Version: "ffmpeg version 7.1",
+		Profiles: []string{"aac-128"}, Jobs: 2, CacheBytes: 1 << 20,
+		Cache: func() (int64, int) { return 4096, 1 },
+	}
+	var on struct {
+		Transcode Transcoding `json:"transcode"`
+	}
+	json.Unmarshal(e.do("GET", "/api/state", "").Body.Bytes(), &on)
+	if !on.Transcode.Available || on.Transcode.Version != "ffmpeg version 7.1" {
+		t.Errorf("want the ffmpeg shown, got %+v", on.Transcode)
+	}
+	if on.Transcode.UsedBytes != 4096 || on.Transcode.Files != 1 {
+		t.Errorf("want the cache counted, got %d bytes in %d files",
+			on.Transcode.UsedBytes, on.Transcode.Files)
+	}
+}

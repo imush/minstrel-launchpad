@@ -17,6 +17,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,7 +38,17 @@ import (
 	"github.com/imush/minstrel-launchpad/internal/transcode"
 )
 
-var version = "dev"
+var (
+	// version is the release tag, set at build time.
+	version = "dev"
+	// packaging says how this binary was shipped, when whoever shipped it
+	// said so: "docker", a port or package name. It tells a user reading
+	// the console how they are expected to update.
+	packaging = ""
+	// build is everything else worth knowing about this binary, filled in
+	// at startup by buildInfo.
+	build = ""
+)
 
 const usage = `usage: minstrel-launchpad [command] [flags]
 
@@ -56,6 +68,7 @@ also be set by environment, e.g. LAUNCHPAD_PUBLIC for -public.
 `
 
 func main() {
+	version, build = buildInfo()
 	cmd, args := "serve", os.Args[1:]
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]
@@ -79,7 +92,7 @@ func main() {
 	case "status":
 		err = status(args)
 	case "version":
-		fmt.Println(version)
+		fmt.Printf("minstrel-launchpad %s (%s)\n", version, build)
 	case "help":
 		fmt.Print(usage)
 	default:
@@ -90,6 +103,56 @@ func main() {
 		fmt.Fprintln(os.Stderr, "minstrel-launchpad:", err)
 		os.Exit(1)
 	}
+}
+
+// buildInfo settles what this binary calls itself. A release is built with
+// -X main.version; anything else falls back to what the Go toolchain
+// stamped from the checkout, so a console still shows something a bug
+// report can be matched against.
+func buildInfo() (ver, build string) {
+	ver = version
+	var revision string
+	var dirty bool
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if ver == "dev" && isRelease(bi.Main.Version) {
+			ver = bi.Main.Version // go install module@tag
+		}
+		for _, set := range bi.Settings {
+			switch set.Key {
+			case "vcs.revision":
+				revision = set.Value
+			case "vcs.modified":
+				dirty = set.Value == "true"
+			}
+		}
+	}
+	if ver == "dev" && revision != "" {
+		ver = revision[:min(12, len(revision))]
+	}
+	parts := []string{}
+	if packaging != "" {
+		parts = append(parts, packaging)
+	}
+	parts = append(parts, runtime.GOOS+"/"+runtime.GOARCH, runtime.Version())
+	if revision != "" && !strings.HasPrefix(revision, ver) {
+		parts = append(parts, revision[:min(12, len(revision))])
+	}
+	if dirty {
+		parts = append(parts, "uncommitted changes")
+	}
+	return ver, strings.Join(parts, " \u00b7 ")
+}
+
+// isRelease rejects what the toolchain invents for a checkout with no tag:
+// "(devel)", or a pseudo-version like v0.0.0-20261030002832-886a657dc032,
+// which says less than the bare revision does.
+func isRelease(v string) bool {
+	if v == "" || v == "(devel)" {
+		return false
+	}
+	trimmed := strings.TrimSuffix(v, "+dirty")
+	i := strings.LastIndex(trimmed, "-")
+	return i <= 0 || len(trimmed)-i != 13 // "-" + 12 hex of revision
 }
 
 func env(key, def string) string {
@@ -217,13 +280,21 @@ func serve(args []string) error {
 	pairing.SetPublic(publicList)
 	limiter := auth.NewLimiter()
 	var tc *transcode.Transcoder
-	if *ffmpeg != "off" {
-		tc = transcode.New(*ffmpeg, filepath.Join(*data, "transcoded"), *tcParallel, int64(*tcCache)<<20, log)
-		if tc != nil {
-			log.Info("compression available", "ffmpeg", tc.Path())
-		} else {
-			log.Info("no ffmpeg: lossless audio is always sent as is")
+	var tr console.Transcoding
+	if *ffmpeg == "off" {
+		tr.Reason = "turned off with -ffmpeg off / LAUNCHPAD_FFMPEG=off"
+		log.Info("compression turned off: lossless audio is always sent as is")
+	} else if t, err := transcode.New(*ffmpeg, filepath.Join(*data, "transcoded"), *tcParallel, int64(*tcCache)<<20, log); err != nil {
+		tr.Reason = err.Error()
+		log.Info("no compression: lossless audio is always sent as is", "err", err)
+	} else {
+		tc = t
+		tr = console.Transcoding{
+			Available: true, FFmpeg: t.Path(), Version: t.Version(),
+			Profiles: transcode.Profiles, Jobs: t.Jobs(),
+			CacheBytes: t.CacheBytes(), Cache: t.Cache,
 		}
+		log.Info("compression available", "ffmpeg", t.Path(), "version", t.Version(), "jobs", t.Jobs())
 	}
 	h := &server.Handler{
 		Transcoder: tc,
@@ -299,8 +370,9 @@ func serve(args []string) error {
 			return u
 		}
 		c := &console.Console{
-			Version: version, Fingerprint: fp,
-			Pairing: pairing, Store: store, Registry: reg, Settings: setFile,
+			Version: version, Build: build, Fingerprint: fp,
+			Transcode: tr,
+			Pairing:   pairing, Store: store, Registry: reg, Settings: setFile,
 			Access: access, Limiter: limiter, Log: log,
 			Satellite:  sat,
 			NameLocked: nameLocked, PublicLocked: publicLocked, ServersLocked: serversLocked,
@@ -335,7 +407,7 @@ func serve(args []string) error {
 	}
 	go func() { served <- srv.ServeTLS(ln, "", "") }()
 
-	log.Info("launchpad ready", "name", homeName, "version", version, "listen", *listen, "data", *data, "fingerprint", fp)
+	log.Info("launchpad ready", "name", homeName, "version", version, "build", build, "listen", *listen, "data", *data, "fingerprint", fp)
 	if len(pairing.Public()) == 0 && *satLink == "" {
 		log.Warn("no outside address: the app can pair and play at home only; forward a port on the router " +
 			"and set its static IP or dynamic DNS name on the console, or join a satellite there")

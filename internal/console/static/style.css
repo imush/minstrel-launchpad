@@ -7,6 +7,7 @@
   --accent: #3b5bdb;
   --accent-text: #ffffff;
   --error: #c92a2a;
+  --ok: #2f9e44;
   --note-bg: #fff6e0;
   --note-text: #6b4e00;
   --code-bg: #efeee9;
@@ -22,6 +23,7 @@
     --accent: #7d95f5;
     --accent-text: #10131f;
     --error: #ff8787;
+    --ok: #69db7c;
     --note-bg: #352c12;
     --note-text: #f2d48a;
     --code-bg: #2b2a27;
@@ -108,6 +110,16 @@ table.list { width: 100%; border-collapse: collapse; font-size: 14px; }
 .list tr:last-child td { border-bottom: none; }
 .list .secondary { display: block; color: var(--muted); font-size: 12.5px; }
 .empty { margin: 8px 0 0; }
+/* A plain on-or-not status line: a dot and a word. */
+.ok, .warn { margin: 4px 0 10px; }
+.warn { color: var(--muted); }
+.ok::before, .warn::before {
+  content: ""; display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; margin-right: 7px; vertical-align: 1px;
+}
+.ok::before { background: var(--ok); }
+.warn::before { background: var(--muted); }
+#tc-details td:first-child { color: var(--muted); width: 130px; }
 details { margin-top: 14px; }
 summary { cursor: pointer; font-size: 14px; color: var(--accent); }
 .foot { text-align: center; margin: 8px 0 32px; }
@@ -124,3 +136,7 @@ summary { cursor: pointer; font-size: 14px; color: var(--accent); }
   .card { padding: 16px; }
 }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 600px) {
+  /* The key comes from data-k on the value cell instead. */
+  #tc-details td:first-child { display: none; }
+}

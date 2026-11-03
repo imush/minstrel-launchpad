@@ -5,7 +5,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOARM=${TARGETVARIANT#v} \
-    go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o /out/minstrel-launchpad .
+    go build -trimpath -ldflags "-s -w -X main.version=$VERSION -X main.packaging=docker" \
+        -o /out/minstrel-launchpad .
 
 # Nothing but the binary: it only talks HTTP on the LAN and serves its own
 # self-signed HTTPS, so it needs no CA bundle or shell.

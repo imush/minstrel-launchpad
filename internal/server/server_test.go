@@ -284,7 +284,11 @@ func fakeFFmpeg(t *testing.T) string {
 func TestTranscode(t *testing.T) {
 	h, _, origin, token := setup(t)
 	be := origin
-	h.Transcoder = transcode.New(fakeFFmpeg(t), t.TempDir(), 2, 1<<20, h.Log)
+	tr, err := transcode.New(fakeFFmpeg(t), t.TempDir(), 2, 1<<20, h.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Transcoder = tr
 	if h.Transcoder == nil {
 		t.Fatal("no transcoder")
 	}

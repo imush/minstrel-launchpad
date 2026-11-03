@@ -143,6 +143,15 @@
     </section>
 
     <section class="card">
+      <h2>Compression</h2>
+      <p class="muted">The app may ask for a smaller copy of a lossless track when it's on mobile data.
+        Without it the original is sent, which is fine at home.</p>
+      <p id="tc-state"></p>
+      <table class="list" id="tc-table"><tbody id="tc-details"></tbody></table>
+      <p class="muted small" id="tc-note"></p>
+    </section>
+
+    <section class="card">
       <div class="bar">
         <h2>Media servers</h2>
         <button id="refresh" class="ghost">Scan now</button>
@@ -161,7 +170,8 @@
       </details>
     </section>
 
-    <p class="muted small foot">Certificate fingerprint <code id="fingerprint"></code></p>
+    <p class="muted small foot">Certificate fingerprint <code id="fingerprint"></code><br>
+      <span id="build"></span></p>
   </div>
 </main>
 </body>
