@@ -24,7 +24,8 @@ in the app, off by default. Players and the app at home always get the
 original, and lossy files pass through untouched.
 
 It needs ffmpeg on the launchpad's machine (`-ffmpeg`, default: from
-PATH); without it the launchpad says so and sends originals. Playback
+PATH); without it the launchpad sends originals, and the console says so
+(installing it: below). Playback
 starts while ffmpeg works. Conversions run at low priority and at most
 four times playback speed, so a small NAS or router isn't swamped: about a
 quarter of one Atom C2750 core per listener. Finished conversions are
@@ -55,6 +56,34 @@ Or the binary, on Linux, FreeBSD, macOS or Windows:
 On first start it prints a setup link for the console to its log
 (`docker logs launchpad`). Open it in a browser at home, set the console
 password, and the rest is done there.
+
+### ffmpeg, for compression
+
+Optional: without it everything works and lossless files are sent as they
+are, which is what you want at home anyway. To let the app ask for a
+smaller copy over mobile data, install ffmpeg where the launchpad runs and
+restart it:
+
+    apt install ffmpeg      # Debian, Ubuntu, Raspberry Pi OS
+    pkg install ffmpeg      # FreeBSD, jails
+    brew install ffmpeg     # macOS
+
+It arrives with a long tail of dependencies; that is normal, and any build
+that reads FLAC and writes AAC will do.
+
+The console's **Compression** card says which ffmpeg was found and what
+version it is, or why there is none — check there first. If it says there
+is none although you installed one, PATH is the usual reason: a service
+manager hands down its own, often without `/usr/local/bin`. Either fix
+that or name the binary:
+
+    minstrel-launchpad serve -ffmpeg /usr/local/bin/ffmpeg
+
+`LAUNCHPAD_FFMPEG` does the same, and `-ffmpeg off` never converts.
+
+In Docker it has to be in the image, where you can't install it yourself:
+the Dockerfile here builds `FROM scratch` and carries none, so compression
+is off until an image that includes ffmpeg is published.
 
 ## The console
 
