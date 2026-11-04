@@ -119,6 +119,13 @@ func (p *Pairing) Addresses() []string {
 	for _, ifc := range lan.IPv4() {
 		out = append(out, net.JoinHostPort(ifc.Addr.String(), p.Port))
 	}
+	// A global IPv6 address needs no NAT, so it may work from outside as
+	// well as at home -- when the router lets it in. The app learns the
+	// current list on every connection, so one that changes with the
+	// prefix is picked up without anything to configure.
+	for _, ifc := range lan.GlobalIPv6() {
+		out = append(out, net.JoinHostPort(ifc.Addr.String(), p.Port))
+	}
 	return out
 }
 

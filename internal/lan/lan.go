@@ -70,3 +70,37 @@ func IPv4() []Interface {
 	}
 	return out
 }
+
+// GlobalIPv6 lists the globally routable IPv6 addresses of the interfaces
+// that face the home network. Unlike IPv4 these need no NAT, so one of them
+// may be reachable from outside -- if the router allows it in. Advertising
+// one that it doesn't costs nothing: the app races every address it knows
+// and a blocked one simply loses.
+//
+// Link-local and unique-local addresses are left out: the first cannot be
+// used without a zone, and neither can be reached from beyond the house.
+func GlobalIPv6() []Interface {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []Interface
+	for _, ifc := range ifs {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || virtual(ifc.Name) {
+			continue
+		}
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			p, err := netip.ParsePrefix(a.String())
+			if err != nil {
+				continue
+			}
+			ip := p.Addr()
+			if ip.Is6() && !ip.Is4In6() && ip.IsGlobalUnicast() && !ip.IsPrivate() &&
+				!ip.IsLinkLocalUnicast() {
+				out = append(out, Interface{ifc, ip})
+			}
+		}
+	}
+	return out
+}
