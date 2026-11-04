@@ -44,10 +44,15 @@ block other ports usually let HTTPS through.
 
 ## Running it
 
-Docker (most NAS boxes). Host networking is needed for discovery:
+Docker (most NAS boxes). Host networking is needed for discovery, and the
+data directory has to be a path you choose -- an unnamed volume is replaced
+when the container is recreated, which silently unpairs every device:
 
     docker run -d --name launchpad --network host --restart unless-stopped \
-      -v launchpad:/data minstrel-launchpad
+      -v /srv/launchpad:/data imush/minstrel-launchpad:1
+
+Or with the `docker-compose.yml` in this repository, `docker compose up -d`.
+The image carries ffmpeg, so compression works without anything further.
 
 Or the binary, on Linux, FreeBSD, macOS or Windows:
 
@@ -81,9 +86,8 @@ that or name the binary:
 
 `LAUNCHPAD_FFMPEG` does the same, and `-ffmpeg off` never converts.
 
-In Docker it has to be in the image, where you can't install it yourself:
-the Dockerfile here builds `FROM scratch` and carries none, so compression
-is off until an image that includes ffmpeg is published.
+In Docker it has to be in the image, where you can't install it yourself --
+which is why the published image carries it.
 
 ## The console
 

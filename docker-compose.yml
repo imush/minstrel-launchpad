@@ -1,0 +1,21 @@
+# Run the launchpad next to your media server.
+#
+#   docker compose up -d
+#   docker compose logs launchpad     # prints the console's setup link
+#
+# On a Synology, paste this into Container Manager -> Project, and change the
+# volume to a real share such as /volume1/docker/launchpad:/data.
+services:
+  launchpad:
+    image: imush/minstrel-launchpad:1
+    container_name: launchpad
+    # Host networking is required: the launchpad finds media servers with SSDP
+    # multicast, which does not cross a Docker bridge network. It also means
+    # ports 7443 and 7444 are used directly, with nothing to map.
+    network_mode: host
+    volumes:
+      # Keys, paired devices and settings. Must be a path you choose: an
+      # unnamed volume is replaced when the container is recreated, which
+      # silently unpairs every device.
+      - ./data:/data
+    restart: unless-stopped
