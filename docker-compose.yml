@@ -3,8 +3,10 @@
 #   docker compose up -d
 #   docker compose logs launchpad     # prints the console's setup link
 #
-# On a Synology, paste this into Container Manager -> Project, and change the
-# volume to a real share such as /volume1/docker/launchpad:/data.
+# On a NAS, paste this wherever it takes a compose file -- Synology's
+# Container Manager -> Project, QNAP's Container Station, and so on -- and
+# point the volume at a real share: /volume1/docker/launchpad on Synology,
+# /share/Container/launchpad on QNAP, /mnt/user/appdata/launchpad on unRAID.
 services:
   launchpad:
     image: imush/minstrel-launchpad:latest
