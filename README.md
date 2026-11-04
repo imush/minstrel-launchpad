@@ -42,6 +42,17 @@ that the app can still pair and play at home.
 Use 443 as the external port if you can: hotel and office networks that
 block other ports usually let HTTPS through.
 
+Over IPv6 there is nothing to forward. The launchpad has its own routable
+address, so the router only has to allow inbound TCP to port 7443 -- a
+firewall rule, not a redirect. It finds its global IPv6 addresses itself and
+offers them to the app with the rest, and the app uses whichever answers
+first, so there is nothing to configure and a changed prefix is picked up on
+the next connection at home.
+
+That is the one route that works behind carrier-grade NAT, where no IPv4 port
+exists to forward. It needs a provider that routes IPv6 and does not filter
+inbound, and a mobile network that has IPv6 at the other end.
+
 ## Running it
 
 Docker (most NAS boxes). Host networking is needed for discovery, and the
