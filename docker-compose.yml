@@ -7,7 +7,7 @@
 # volume to a real share such as /volume1/docker/launchpad:/data.
 services:
   launchpad:
-    image: imush/minstrel-launchpad:1
+    image: imush/minstrel-launchpad:latest
     container_name: launchpad
     # Host networking is required: the launchpad finds media servers with SSDP
     # multicast, which does not cross a Docker bridge network. It also means

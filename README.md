@@ -49,7 +49,7 @@ data directory has to be a path you choose -- an unnamed volume is replaced
 when the container is recreated, which silently unpairs every device:
 
     docker run -d --name launchpad --network host --restart unless-stopped \
-      -v /srv/launchpad:/data imush/minstrel-launchpad:1
+      -v /srv/launchpad:/data imush/minstrel-launchpad:latest
 
 Or with the `docker-compose.yml` in this repository, `docker compose up -d`.
 The image carries ffmpeg, so compression works without anything further.
