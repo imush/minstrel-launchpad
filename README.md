@@ -1,6 +1,6 @@
 # minstrel-launchpad
 
-The home companion for [Minstrel](../minstrel-app). It makes the UPnP/DLNA
+The home companion for [Minstrel](https://github.com/imush/minstrel). It makes the UPnP/DLNA
 media servers in your home (MinimServer, and any other) playable from the
 Minstrel app anywhere: over cellular, at work, in the car.
 
