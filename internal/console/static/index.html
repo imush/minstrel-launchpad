@@ -84,6 +84,10 @@
         </form>
         <p class="muted small">Paired devices pick up a changed address the next time they connect.</p>
         <p class="muted small">At home the app uses <span id="lan"></span>.</p>
+        <p class="muted small" id="ipv6-row" hidden>Over IPv6 there is nothing to forward: this launchpad already has
+          its own address, <span id="ipv6"></span>, and the app is told about it automatically. To use it from outside,
+          allow inbound TCP to port <b class="port"></b> on the router &mdash; a firewall rule, not a redirect. It is the
+          only way in when your provider shares one IPv4 address between homes.</p>
       </div>
       <div id="tab-satellite" hidden>
         <p class="muted small">No port to forward: the launchpad connects out to a minstrel-satellite, and the app

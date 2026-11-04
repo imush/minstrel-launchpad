@@ -298,6 +298,12 @@ func (c *Console) state(w http.ResponseWriter, r *http.Request) {
 	for _, ifc := range lan.IPv4() {
 		lanAddrs = append(lanAddrs, net.JoinHostPort(ifc.Addr.String(), c.Pairing.Port))
 	}
+	// Separate from the IPv4 ones: these may work from outside too, which is
+	// the whole point of showing them, and the page says so.
+	var v6Addrs []string
+	for _, ifc := range lan.GlobalIPv6() {
+		v6Addrs = append(v6Addrs, net.JoinHostPort(ifc.Addr.String(), c.Pairing.Port))
+	}
 	tc := c.Transcode
 	if tc.Cache != nil {
 		tc.UsedBytes, tc.Files = tc.Cache()
@@ -311,6 +317,7 @@ func (c *Console) state(w http.ResponseWriter, r *http.Request) {
 		"fingerprint":     c.Fingerprint,
 		"port":            c.Pairing.Port,
 		"lan":             lanAddrs,
+		"ipv6":            nonNil(v6Addrs),
 		"public":          nonNil(c.Pairing.Public()),
 		"publicLocked":    c.PublicLocked,
 		"satellite":       c.satelliteStatus(),

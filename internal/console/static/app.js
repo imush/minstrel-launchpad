@@ -173,6 +173,9 @@ function render(s) {
   $('fingerprint').textContent = s.fingerprint;
   for (const el of document.querySelectorAll('.port')) el.textContent = s.port;
   $('lan').textContent = s.lan.length ? s.lan.join(', ') : 'no home-network address (check the network)';
+  const v6 = s.ipv6 || [];
+  $('ipv6-row').hidden = v6.length === 0;
+  $('ipv6').textContent = v6.join(', ');
 
   // Unsaved edits stay until saved.
   if (!$('name').dataset.dirty) $('name').value = s.name;
