@@ -140,7 +140,10 @@ func (t *Transcoder) Cache() (bytes int64, files int) {
 // ffmpegVersion asks ffmpeg what it is, so the console can show it. One
 // that won't answer is still used; only the label goes missing.
 func ffmpegVersion(path string, log *slog.Logger) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Generous: on a slow NAS, loading ffmpeg and its libraries cold after a
+	// reboot can take several seconds, and losing the version for that is a
+	// worse trade than waiting.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "-version").Output()
 	if err != nil {
