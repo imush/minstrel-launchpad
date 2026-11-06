@@ -182,6 +182,16 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
+	case r.URL.Path == "/label" && r.Method == http.MethodPost:
+		ok, err := a.Store.SetLabel(r.URL.Query().Get("id"), r.URL.Query().Get("label"))
+		switch {
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		case !ok:
+			http.Error(w, "no such device", http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
 	case r.URL.Path == "/status" && r.Method == http.MethodGet:
 		writeJSON(w, map[string]any{
 			"name":        a.Pairing.Name(),

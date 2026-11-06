@@ -485,15 +485,28 @@ func (c *Console) revoke(w http.ResponseWriter, r *http.Request) {
 	respond(w, ok, err)
 }
 
-// updateDevice lets a device invite others from the app, or stops it.
+// updateDevice says whose a device is, lets it invite others from the app,
+// or stops it. Both fields are optional: sending one must not quietly
+// change the other, so they are pointers rather than plain values.
 func (c *Console) updateDevice(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Share bool }
+	var req struct {
+		Share *bool
+		Label *string
+	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	ok, err := c.Store.SetShare(r.PathValue("id"), req.Share)
-	if ok {
-		c.Log.Info("device access changed on the console", "id", r.PathValue("id"), "share", req.Share)
+	id := r.PathValue("id")
+	ok, err := true, error(nil)
+	if req.Share != nil {
+		if ok, err = c.Store.SetShare(id, *req.Share); ok && err == nil {
+			c.Log.Info("device access changed on the console", "id", id, "share", *req.Share)
+		}
+	}
+	if ok && err == nil && req.Label != nil {
+		if ok, err = c.Store.SetLabel(id, *req.Label); ok && err == nil {
+			c.Log.Info("device renamed on the console", "id", id, "label", *req.Label)
+		}
 	}
 	respond(w, ok, err)
 }

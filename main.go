@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -57,6 +58,7 @@ commands:
   pair             show a QR code to pair the Minstrel app (-share: it may invite others)
   console          print a link to set the console password
   devices          list paired devices
+  rename <id> <who>  say whose device it is, e.g. "Sarah's phone"
   revoke <id>      unpair a device
   share <id>       let a device invite others from the app
   unshare <id>     stop a device inviting others
@@ -83,6 +85,8 @@ func main() {
 		err = consoleLink(args)
 	case "devices":
 		err = devices(args)
+	case "rename":
+		err = rename(args)
 	case "revoke":
 		err = revoke(args)
 	case "share":
@@ -546,7 +550,7 @@ func devices(args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tACCESS\tINVITED BY\tPAIRED\tLAST SEEN\tFROM")
+	fmt.Fprintln(tw, "ID\tNAME\tFOR\tACCESS\tINVITED BY\tPAIRED\tLAST SEEN\tFROM")
 	for _, d := range list {
 		seen := "never"
 		if !d.LastSeen.IsZero() {
@@ -560,8 +564,12 @@ func devices(args []string) error {
 		if by == "" {
 			by = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			d.ID, d.Name, access, by, d.Created.Local().Format("2006-01-02"), seen, d.LastAddr)
+		who := d.Label
+		if who == "" {
+			who = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			d.ID, d.Name, who, access, by, d.Created.Local().Format("2006-01-02"), seen, d.LastAddr)
 	}
 	return tw.Flush()
 }
@@ -577,6 +585,26 @@ func revoke(args []string) error {
 		return err
 	}
 	fmt.Println("Revoked", fs.Arg(0))
+	return nil
+}
+
+func rename(args []string) error {
+	fs := flag.NewFlagSet("rename", flag.ExitOnError)
+	data := dataFlag(fs)
+	_ = fs.Parse(args)
+	if fs.NArg() < 1 {
+		return errors.New("usage: minstrel-launchpad rename <device id> <who it is for>")
+	}
+	who := strings.TrimSpace(strings.Join(fs.Args()[1:], " "))
+	if err := adminCall(*data, http.MethodPost,
+		"/label?id="+url.QueryEscape(fs.Arg(0))+"&label="+url.QueryEscape(who), nil); err != nil {
+		return err
+	}
+	if who == "" {
+		fmt.Println(fs.Arg(0), "is no longer labelled")
+	} else {
+		fmt.Printf("%s is now %q\n", fs.Arg(0), who)
+	}
 	return nil
 }
 

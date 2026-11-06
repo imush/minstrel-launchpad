@@ -278,6 +278,29 @@ func (s *Store) SetShare(id string, share bool) (bool, error) {
 	return true, nil
 }
 
+// SetLabel says whose device this is. Devices report their own name at
+// pairing ("iPhone", "Android phone"), which several of them share, so the
+// label is what tells them apart. An empty label clears it.
+func (s *Store) SetLabel(id, label string) (bool, error) {
+	label = strings.TrimSpace(label)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.devices, func(d *Device) bool { return d.ID == id })
+	if i < 0 {
+		return false, nil
+	}
+	was := s.devices[i].Label
+	if was == label {
+		return true, nil
+	}
+	s.devices[i].Label = label
+	if err := s.save(); err != nil {
+		s.devices[i].Label = was
+		return false, err
+	}
+	return true, nil
+}
+
 // Flush saves last-seen times, which are kept in memory between saves.
 func (s *Store) Flush() error {
 	s.mu.Lock()

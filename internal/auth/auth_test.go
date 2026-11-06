@@ -124,3 +124,44 @@ func TestInvitations(t *testing.T) {
 		t.Errorf("cancelled code accepted: %v", err)
 	}
 }
+
+func TestRenaming(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "devices.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := s.NewCode(time.Minute)
+	_, dev, err := s.Pair(code, "Android phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dev.Label != "" {
+		t.Errorf("unlabelled device starts with %q", dev.Label)
+	}
+	if ok, err := s.SetLabel(dev.ID, "  Sarah's phone  "); !ok || err != nil {
+		t.Fatalf("set: %v %v", ok, err)
+	}
+	if got := s.Devices()[0]; got.Label != "Sarah's phone" || got.Name != "Android phone" {
+		t.Errorf("after renaming: %+v", got)
+	}
+
+	// It is the point of the thing that it outlives a restart.
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := again.Devices()[0].Label; got != "Sarah's phone" {
+		t.Errorf("not saved: %q", got)
+	}
+
+	if ok, _ := again.SetLabel(dev.ID, ""); !ok {
+		t.Errorf("clearing refused")
+	}
+	if got := again.Devices()[0].Label; got != "" {
+		t.Errorf("not cleared: %q", got)
+	}
+	if ok, err := again.SetLabel("nosuchdevice", "x"); ok || err != nil {
+		t.Errorf("unknown device: %v %v", ok, err)
+	}
+}

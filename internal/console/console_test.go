@@ -376,3 +376,49 @@ func TestTranscodingState(t *testing.T) {
 			on.Transcode.UsedBytes, on.Transcode.Files)
 	}
 }
+
+func TestRenameDevice(t *testing.T) {
+	e := setup(t)
+	e.login(t)
+	rec := e.do("POST", "/api/invitations", `{"valid":"10m"}`)
+	var inv struct{ ID, Code string }
+	json.Unmarshal(rec.Body.Bytes(), &inv)
+	_, dev, err := e.store.Pair(inv.Code, "Android phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.SetShare(dev.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := e.do("PUT", "/api/devices/"+dev.ID, `{"label":"Sarah's phone"}`); rec.Code != 204 {
+		t.Fatalf("rename: %d %s", rec.Code, rec.Body)
+	}
+	got := e.store.Devices()[0]
+	if got.Label != "Sarah's phone" {
+		t.Errorf("label %q", got.Label)
+	}
+	// The two fields travel separately: renaming must not quietly take away
+	// the right to invite, which a plain bool in the request would have.
+	if !got.Share {
+		t.Errorf("renaming cleared share")
+	}
+
+	// And the other way round.
+	if rec := e.do("PUT", "/api/devices/"+dev.ID, `{"share":false}`); rec.Code != 204 {
+		t.Fatalf("unshare: %d", rec.Code)
+	}
+	if got := e.store.Devices()[0]; got.Share || got.Label != "Sarah's phone" {
+		t.Errorf("unsharing changed the label: %+v", got)
+	}
+
+	if rec := e.do("PUT", "/api/devices/"+dev.ID, `{"label":""}`); rec.Code != 204 {
+		t.Fatalf("clear: %d", rec.Code)
+	}
+	if got := e.store.Devices()[0].Label; got != "" {
+		t.Errorf("not cleared: %q", got)
+	}
+	if rec := e.do("PUT", "/api/devices/nosuchdevice", `{"label":"x"}`); rec.Code != 404 {
+		t.Errorf("unknown device: %d", rec.Code)
+	}
+}

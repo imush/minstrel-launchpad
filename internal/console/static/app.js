@@ -155,6 +155,51 @@ function accessCell(d) {
   return td;
 }
 
+// Whose device this is. Devices report their own name at pairing and
+// several report the same one ("Android phone"), so the label leads and
+// the reported name goes underneath.
+function nameCell(s, d) {
+  const td = cell(d.label || d.name, null, [
+    d.label && d.label !== d.name ? d.name : '',
+    d.invitedBy ? 'invited by ' + deviceName(s, d.invitedBy) : '',
+    'id ' + d.id,
+  ].filter(Boolean).join(' \u00b7 '));
+  const b = document.createElement('button');
+  b.className = 'ghost small';
+  b.textContent = d.label ? 'Rename' : 'Say whose';
+  b.addEventListener('click', () => editLabel(td, d));
+  td.append(' ', b);
+  return td;
+}
+
+// Swaps the cell for a field. Enter or leaving it saves, Escape puts it
+// back, and an empty value clears the label.
+function editLabel(td, d) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = d.label || '';
+  input.placeholder = 'Whose is it?';
+  input.setAttribute('aria-label', 'Whose device this is');
+  let done = false;
+  const save = async () => {
+    if (done) return;
+    done = true;
+    const label = input.value.trim();
+    if (label !== (d.label || '')) {
+      await api('PUT', 'devices/' + d.id, { label }).catch(alertError);
+    }
+    load();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') save();
+    if (e.key === 'Escape') { done = true; load(); }
+  });
+  input.addEventListener('blur', save);
+  td.replaceChildren(input);
+  input.focus();
+  input.select();
+}
+
 function fill(tbody, empty, rows) {
   $(tbody).replaceChildren(...rows);
   $(empty).hidden = rows.length > 0;
@@ -213,11 +258,7 @@ function render(s) {
     const tr = document.createElement('tr');
     const from = d.lastAddr ? (isLAN(d.lastAddr) ? 'home network' : 'outside') : '';
     tr.append(
-      cell(d.name, null, [
-        d.label && d.label !== d.name ? 'for ' + d.label : '',
-        d.invitedBy ? 'invited by ' + deviceName(s, d.invitedBy) : '',
-        'id ' + d.id,
-      ].filter(Boolean).join(' · ')),
+      nameCell(s, d),
       accessCell(d),
       cell(dateFmt.format(new Date(d.created)), 'Paired'),
       cell(ago(d.lastSeen), 'Last access', d.lastSeen ? timeFmt.format(new Date(d.lastSeen)) : ''),
