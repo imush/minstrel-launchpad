@@ -452,6 +452,7 @@ $('invite-form').addEventListener('submit', async (e) => {
     $('inv-for').textContent = invitation.label ? 'For ' + invitation.label : 'For any device';
     $('inv-expires').textContent = timeFmt.format(new Date(invitation.expires));
     $('inv-code').textContent = invitation.code;
+    $('inv-link-row').hidden = true;
     $('invitation').hidden = false;
     $('label').value = '';
     $('share').checked = false;
@@ -465,6 +466,8 @@ function hideInvitation() {
   invitation = null;
   $('invitation').hidden = true;
   $('qr').removeAttribute('src');
+  $('inv-link-row').hidden = true;
+  $('inv-link').value = '';
 }
 
 $('done').addEventListener('click', hideInvitation);
@@ -479,11 +482,49 @@ $('download').addEventListener('click', () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 });
 
+// navigator.clipboard exists only in a secure context, which this page
+// usually isn't: it is served over plain HTTP on a home address. The old
+// textarea trick still works there. Where even that is refused, the link
+// is shown for copying by hand rather than the button doing nothing.
+async function copyText(text) {
+  if (window.isSecureContext && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Refused; try the fallback below.
+    }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.readOnly = true;
+  ta.style.position = 'fixed';
+  ta.style.top = '-1000px';
+  document.body.append(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch {
+    ok = false;
+  }
+  ta.remove();
+  return ok;
+}
+
 $('copy').addEventListener('click', async (e) => {
   if (!invitation) return;
-  await navigator.clipboard.writeText(invitation.uri);
-  e.target.textContent = 'Copied';
-  setTimeout(() => { e.target.textContent = 'Copy link'; }, 1500);
+  const b = e.target;
+  if (await copyText(invitation.uri)) {
+    $('inv-link-row').hidden = true;
+    b.textContent = 'Copied';
+    setTimeout(() => { b.textContent = 'Copy link'; }, 1500);
+    return;
+  }
+  $('inv-link').value = invitation.uri;
+  $('inv-link-row').hidden = false;
+  $('inv-link').focus();
+  $('inv-link').select();
 });
 
 // Keep "last access" and the server list current while the page is open.
