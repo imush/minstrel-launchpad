@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Container version="2">
+  <Name>minstrel-launchpad</Name>
+  <Repository>imush/minstrel-launchpad:latest</Repository>
+  <Registry>https://hub.docker.com/r/imush/minstrel-launchpad</Registry>
+  <!--
+    Host networking is not a preference here. The launchpad finds media
+    servers with SSDP multicast, which does not cross a Docker bridge: on a
+    bridge the server list is simply empty, with nothing to say why.
+  -->
+  <Network>host</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://forums.unraid.net/topic/TODO-SUPPORT-THREAD/</Support>
+  <Project>https://github.com/imush/minstrel-launchpad</Project>
+  <Overview>
+    Reach your own music from outside the house. minstrel-launchpad sits on
+    your network beside your UPnP/DLNA media server (MinimServer, Gerbera,
+    Plex's DLNA, a NAS's own server) and lets the Minstrel app browse and play
+    from it while you are away, over TLS pinned to this launchpad's own
+    certificate. Only devices you have paired, by scanning a QR code on your
+    own network, can connect; there is no account and no third party in the
+    path. Where a port cannot be opened &#8212; carrier-grade NAT, for instance
+    &#8212; it can fall back to a relay you run yourself.
+
+    Needs host networking: media servers are found with SSDP multicast, which
+    a Docker bridge network does not carry.
+
+    After starting it, open the container log for a one-time link that sets
+    the console password.
+  </Overview>
+  <Description>
+    Reach your own music from outside the house.
+
+    minstrel-launchpad sits beside your UPnP/DLNA media server and lets the
+    Minstrel app browse and play from it while you are away. Traffic is TLS
+    pinned to this launchpad's own certificate, and only devices paired by
+    scanning a QR code on your own network can connect. No account, no cloud,
+    nothing sent anywhere you did not choose.
+
+    &#8226; Works with any UPnP/DLNA media server on the same network
+    &#8226; ffmpeg is included, so it can send a smaller copy over mobile data
+    &#8226; Optional self-hosted relay for homes behind carrier-grade NAT
+    &#8226; Web console for pairing, naming devices and revoking them
+
+    Open the container log after first start for the console setup link.
+  </Description>
+  <Category>MediaApp:Music Tools:Utilities</Category>
+  <WebUI>http://[IP]:7444/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/imush/minstrel-launchpad/main/templates/minstrel-launchpad.xml</TemplateURL>
+  <Icon>https://minstrelplayer.org/apple-touch-icon.png</Icon>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/minstrel-launchpad" Mode="rw" Description="Pairings, the launchpad's TLS key and its settings. Keep it: recreating the container with an empty one unpairs every device." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/minstrel-launchpad</Config>
+</Container>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Repository profile for Unraid Community Applications. Must stay in the
+  repository root with a non-empty <Profile>; the app templates live in
+  templates/.
+-->
+<CommunityApplications>
+  <Profile>
+    minstrel-launchpad lets the Minstrel music app reach the UPnP/DLNA media
+    servers on your home network when you are not at home, over a pinned TLS
+    connection that only devices you have paired can use. One small Go binary,
+    no account, nothing sent anywhere else. The image here is the one built
+    from each release tag of the project below, and support happens in the
+    Unraid thread linked on the application.
+  </Profile>
+  <Icon>https://minstrelplayer.org/apple-touch-icon.png</Icon>
+  <WebPage>https://minstrelplayer.org/launchpad</WebPage>
+</CommunityApplications>
