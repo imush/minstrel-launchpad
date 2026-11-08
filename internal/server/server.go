@@ -120,7 +120,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.Registry.Refresh()
 		w.WriteHeader(http.StatusNoContent)
 	case strings.HasPrefix(r.URL.Path, "/u/"):
-		h.relay(w, r)
+		h.relay(w, r, dev)
 	default:
 		http.NotFound(w, r)
 	}
@@ -185,7 +185,11 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request, dev auth.Device) 
 	info := map[string]any{
 		"name":    h.Pairing.Name(),
 		"version": h.Version,
-		"device":  map[string]any{"id": dev.ID, "name": dev.Name, "share": dev.Share},
+		// "video" lets the app grey out what it would only be refused for,
+		// rather than offering a film and failing after the tap.
+		"device": map[string]any{
+			"id": dev.ID, "name": dev.Name, "share": dev.Share, "video": string(dev.Video),
+		},
 		"servers": servers,
 		// What the app may ask for in X-Minstrel-Transcode; none without ffmpeg.
 		"transcode": []string{},
@@ -201,7 +205,7 @@ func (h *Handler) info(w http.ResponseWriter, r *http.Request, dev auth.Device) 
 	writeJSON(w, info)
 }
 
-func (h *Handler) relay(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) relay(w http.ResponseWriter, r *http.Request, dev auth.Device) {
 	hostport, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.EscapedPath(), "/u/"), "/")
 	ap, err := netip.ParseAddrPort(hostport)
 	if err != nil || !h.Registry.Allowed(ap.String()) {
@@ -276,6 +280,16 @@ func (h *Handler) relay(w http.ResponseWriter, r *http.Request) {
 		Transport:     h.Transport,
 		FlushInterval: -1, // stream audio as it arrives
 		ModifyResponse: func(resp *http.Response) error {
+			// Video is refused here rather than earlier because only the
+			// media server's answer says what the file is. Nothing has been
+			// streamed yet, so this costs the caller one request, not a
+			// gigabyte of someone else's bandwidth.
+			if route := RouteOf(r); !dev.Video.Allows(route) &&
+				strings.HasPrefix(resp.Header.Get("Content-Type"), "video/") {
+				h.Log.Info("video refused", "device", dev.ID, "route", route,
+					"allows", string(dev.Video), "path", r.URL.Path)
+				return videoRefused(resp, route)
+			}
 			rewrite.Headers(resp.Header, func(v []byte) []byte { return rewrite.ToClient(v, base, keep) })
 			resp.Header.Del("Set-Cookie")
 			if profile != "" && resp.StatusCode == http.StatusOK && transcode.Lossless(resp.Header.Get("Content-Type")) {

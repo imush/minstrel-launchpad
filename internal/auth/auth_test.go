@@ -165,3 +165,115 @@ func TestRenaming(t *testing.T) {
 		t.Errorf("unknown device: %v %v", ok, err)
 	}
 }
+
+// pairVia makes a device the way the launchpad does: an invitation
+// carrying what it grants, then a pairing against it.
+func pairVia(t *testing.T, s *Store, name, by string, reach VideoReach) Device {
+	t.Helper()
+	code, _, err := s.Invite("", time.Minute, InviteOptions{InvitedBy: by, Video: reach, Share: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, d, err := s.Pair(code, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Video != reach {
+		t.Fatalf("%s paired with %q, not the invitation's %q", name, d.Video, reach)
+	}
+	if d.InvitedBy != by {
+		t.Fatalf("%s invited by %q, not %q", name, d.InvitedBy, by)
+	}
+	return d
+}
+
+func TestVideoReachRules(t *testing.T) {
+	if got := VideoSatellite.AtMost(VideoDirect); got != VideoDirect {
+		t.Errorf("a device may pass on more than it holds: %q", got)
+	}
+	if got := VideoDirect.AtMost(VideoSatellite); got != VideoDirect {
+		t.Errorf("capping lowered something it shouldn't: %q", got)
+	}
+	if got := VideoDirect.AtMost(VideoHome); got != VideoHome {
+		t.Errorf("home-only device passed on %q", got)
+	}
+	for _, c := range []struct {
+		reach VideoReach
+		route Route
+		want  bool
+	}{
+		{VideoHome, RouteHome, true},
+		{VideoHome, RouteDirect, false},
+		{VideoHome, RouteSatellite, false},
+		{VideoDirect, RouteDirect, true},
+		{VideoDirect, RouteSatellite, false},
+		{VideoSatellite, RouteSatellite, true},
+		{VideoSatellite, RouteHome, true},
+	} {
+		if got := c.reach.Allows(c.route); got != c.want {
+			t.Errorf("%q over route %v: got %v", c.reach, c.route, got)
+		}
+	}
+}
+
+func TestSetVideoForDelegation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "devices.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := pairVia(t, s, "owner phone", "", VideoDirect)
+	guest := pairVia(t, s, "guest phone", owner.ID, VideoHome)
+	sub := pairVia(t, s, "sub phone", guest.ID, VideoHome)
+	stranger := pairVia(t, s, "stranger", "", VideoHome)
+
+	reach := func(id string) VideoReach {
+		for _, d := range s.Devices() {
+			if d.ID == id {
+				return d.Video
+			}
+		}
+		return VideoReach("missing")
+	}
+
+	// Capped at the inviter's own: owner holds direct, so satellite is not
+	// theirs to give.
+	if ok, err := s.SetVideoFor(guest.ID, VideoSatellite, owner.ID, false); !ok || err != nil {
+		t.Fatalf("grant: %v %v", ok, err)
+	}
+	if got := reach(guest.ID); got != VideoDirect {
+		t.Errorf("guest got %q, which the owner does not hold", got)
+	}
+
+	// Not yours to change.
+	if ok, _ := s.SetVideoFor(stranger.ID, VideoDirect, owner.ID, false); ok {
+		t.Errorf("a device changed one it never invited")
+	}
+
+	// Recursive reaches the whole subtree.
+	if ok, err := s.SetVideoFor(guest.ID, VideoDirect, "", true); !ok || err != nil {
+		t.Fatalf("recursive: %v %v", ok, err)
+	}
+	if got := reach(sub.ID); got != VideoDirect {
+		t.Errorf("sub-share not updated: %q", got)
+	}
+
+	// Without the flag it stops at the one named.
+	if ok, _ := s.SetVideoFor(guest.ID, VideoHome, "", false); !ok {
+		t.Fatal("set")
+	}
+	if got := reach(sub.ID); got != VideoDirect {
+		t.Errorf("sub-share changed without the recursive flag: %q", got)
+	}
+
+	// And it survives a restart.
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range again.Devices() {
+		if d.ID == guest.ID && d.Video != VideoHome {
+			t.Errorf("not saved: %q", d.Video)
+		}
+	}
+}

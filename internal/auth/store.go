@@ -36,32 +36,105 @@ const tokenPrefix = "mlp_"
 var ErrBadCode = errors.New("invalid or expired pairing code")
 
 // Device is one paired app install.
+// VideoReach says how far from home a device may fetch video.
+//
+// Music and video are not the same cost. An album is tens of megabytes; a
+// film is about a gigabyte an hour, and through a satellite every one of
+// those bytes crosses a relay the launchpad's owner pays for. So the zero
+// value — what a device gets when nobody has said otherwise — is the
+// closed one.
+type VideoReach string
+
+const (
+	// VideoHome: only while the device is on the home network.
+	VideoHome VideoReach = ""
+	// VideoDirect: also when it reaches the launchpad itself from outside.
+	VideoDirect VideoReach = "direct"
+	// VideoSatellite: also when the satellite is the only way in.
+	VideoSatellite VideoReach = "satellite"
+)
+
+// Allows reports whether video may be served over a route.
+func (v VideoReach) Allows(route Route) bool {
+	switch route {
+	case RouteHome:
+		return true
+	case RouteDirect:
+		return v == VideoDirect || v == VideoSatellite
+	default:
+		return v == VideoSatellite
+	}
+}
+
+// rank orders the settings so one can be capped by another.
+func (v VideoReach) rank() int {
+	switch v {
+	case VideoDirect:
+		return 1
+	case VideoSatellite:
+		return 2
+	default:
+		return 0
+	}
+}
+
+// AtMost is v capped by max. Nobody can pass on more than they hold: a
+// device allowed video only at home cannot invite someone who may watch
+// through the satellite, whoever they are.
+func (v VideoReach) AtMost(max VideoReach) VideoReach {
+	if v.rank() > max.rank() {
+		return max
+	}
+	return v
+}
+
+// Valid keeps an unknown string from quietly meaning "home only" when it
+// was meant to grant something.
+func (v VideoReach) Valid() bool {
+	return v == VideoHome || v == VideoDirect || v == VideoSatellite
+}
+
+// Route is how a request reached the launchpad.
+type Route int
+
+const (
+	// RouteHome: from the home network.
+	RouteHome Route = iota
+	// RouteDirect: from outside, straight to the launchpad.
+	RouteDirect
+	// RouteSatellite: from outside, through a relay.
+	RouteSatellite
+)
+
 type Device struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	TokenHash string    `json:"tokenHash"`
-	Label     string    `json:"label,omitempty"`     // from the invitation it was paired with
-	Share     bool      `json:"share,omitempty"`     // may invite others from the app
-	InvitedBy string    `json:"invitedBy,omitempty"` // the device whose invitation it used; empty for the console
-	Created   time.Time `json:"created"`
-	LastSeen  time.Time `json:"lastSeen,omitzero"`
-	LastAddr  string    `json:"lastAddr,omitempty"` // IP it last connected from
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	TokenHash string     `json:"tokenHash"`
+	Label     string     `json:"label,omitempty"`     // from the invitation it was paired with
+	Share     bool       `json:"share,omitempty"`     // may invite others from the app
+	Video     VideoReach `json:"video,omitempty"`     // how far from home it may fetch video
+	InvitedBy string     `json:"invitedBy,omitempty"` // the device whose invitation it used; empty for the console
+	Created   time.Time  `json:"created"`
+	LastSeen  time.Time  `json:"lastSeen,omitzero"`
+	LastAddr  string     `json:"lastAddr,omitempty"` // IP it last connected from
 }
 
 // Invitation is a pairing code not yet used.
 type Invitation struct {
-	ID        string    `json:"id"`
-	Label     string    `json:"label,omitempty"`     // who it's for, shown on the console
-	Share     bool      `json:"share,omitempty"`     // the device paired with it may invite others
-	InvitedBy string    `json:"invitedBy,omitempty"` // the device that made it; empty for the console
-	CodeHash  string    `json:"codeHash"`
-	Created   time.Time `json:"created"`
-	Expires   time.Time `json:"expires"`
+	ID        string     `json:"id"`
+	Label     string     `json:"label,omitempty"`     // who it's for, shown on the console
+	Share     bool       `json:"share,omitempty"`     // the device paired with it may invite others
+	Video     VideoReach `json:"video,omitempty"`     // video reach the paired device starts with
+	InvitedBy string     `json:"invitedBy,omitempty"` // the device that made it; empty for the console
+	CodeHash  string     `json:"codeHash"`
+	Created   time.Time  `json:"created"`
+	Expires   time.Time  `json:"expires"`
 }
 
 // InviteOptions say what an invitation grants and who made it.
 type InviteOptions struct {
 	Share     bool
+	Video     VideoReach
 	InvitedBy string
 }
 
@@ -114,6 +187,7 @@ func (s *Store) Invite(label string, ttl time.Duration, opt InviteOptions) (stri
 		ID:        hex.EncodeToString(random(4)),
 		Label:     cleanName(label, ""),
 		Share:     opt.Share,
+		Video:     opt.Video,
 		InvitedBy: opt.InvitedBy,
 		CodeHash:  hash(code),
 		Created:   now,
@@ -189,6 +263,7 @@ func (s *Store) Pair(code, name string) (string, Device, error) {
 		Name:      cleanName(name, "device"),
 		Label:     inv.Label,
 		Share:     inv.Share,
+		Video:     inv.Video,
 		InvitedBy: inv.InvitedBy,
 		TokenHash: hash(token),
 		Created:   time.Now().UTC().Truncate(time.Second),
@@ -276,6 +351,95 @@ func (s *Store) SetShare(id string, share bool) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// SetVideo says how far from home a device may fetch video.
+func (s *Store) SetVideo(id string, reach VideoReach) (bool, error) {
+	if !reach.Valid() {
+		return false, errors.New("unknown video setting")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.devices, func(d *Device) bool { return d.ID == id })
+	if i < 0 {
+		return false, nil
+	}
+	was := s.devices[i].Video
+	if was == reach {
+		return true, nil
+	}
+	s.devices[i].Video = reach
+	if err := s.save(); err != nil {
+		s.devices[i].Video = was
+		return false, err
+	}
+	return true, nil
+}
+
+// SetVideoFor sets a device's video reach, and optionally that of every
+// device invited through it.
+//
+// [by] is the device asking, or empty for the launchpad's owner on the
+// console. A device may only change what it invited, directly or further
+// down, and may not grant more than it holds itself — otherwise the first
+// guest to be given the satellite could hand it to the world.
+func (s *Store) SetVideoFor(id string, reach VideoReach, by string, recursive bool) (bool, error) {
+	if !reach.Valid() {
+		return false, errors.New("unknown video setting")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	target := slices.IndexFunc(s.devices, func(d *Device) bool { return d.ID == id })
+	if target < 0 {
+		return false, nil
+	}
+	if by != "" {
+		asker := slices.IndexFunc(s.devices, func(d *Device) bool { return d.ID == by })
+		if asker < 0 || !s.invitedThrough(by, id) {
+			return false, nil
+		}
+		reach = reach.AtMost(s.devices[asker].Video)
+	}
+	ids := map[string]bool{id: true}
+	if recursive {
+		for _, d := range s.devices {
+			if s.invitedThrough(id, d.ID) {
+				ids[d.ID] = true
+			}
+		}
+	}
+	was := map[string]VideoReach{}
+	for _, d := range s.devices {
+		if ids[d.ID] {
+			was[d.ID] = d.Video
+			d.Video = reach
+		}
+	}
+	if err := s.save(); err != nil {
+		for _, d := range s.devices {
+			if old, ok := was[d.ID]; ok {
+				d.Video = old
+			}
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// invitedThrough reports whether [id] descends from [root] by invitation.
+// Guards against a cycle in the stored data, which would otherwise hang.
+func (s *Store) invitedThrough(root, id string) bool {
+	for seen, cur := 0, id; cur != "" && seen < len(s.devices)+1; seen++ {
+		i := slices.IndexFunc(s.devices, func(d *Device) bool { return d.ID == cur })
+		if i < 0 {
+			return false
+		}
+		if s.devices[i].InvitedBy == root {
+			return true
+		}
+		cur = s.devices[i].InvitedBy
+	}
+	return false
 }
 
 // SetLabel says whose device this is. Devices report their own name at

@@ -319,6 +319,9 @@ func serve(args []string) error {
 		MaxHeaderBytes:    64 << 10,
 		// TLS errors from scanners would otherwise fill the log.
 		ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelDebug),
+		// Direct and satellite traffic share this server; this is how a
+		// handler tells them apart.
+		ConnContext: server.ConnContext,
 	}
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -326,7 +329,7 @@ func serve(args []string) error {
 	}
 	sat := &satellite.Manager{
 		Cert: cert, Name: pairing.Name, Log: log,
-		Serve: func(l net.Listener) { _ = srv.ServeTLS(l, "", "") },
+		Serve: func(l net.Listener) { _ = srv.ServeTLS(server.SatelliteListener{Listener: l}, "", "") },
 		Saved: func(link string) {
 			if satelliteLocked {
 				return
