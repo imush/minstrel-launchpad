@@ -168,3 +168,8 @@ summary { cursor: pointer; font-size: 14px; color: var(--link); }
   /* The key comes from data-k on the value cell instead. */
   #tc-details td:first-child { display: none; }
 }
+
+/* The video choice sits in a table cell with its own sub-shares tickbox. */
+select.small { font: inherit; font-size: 13px; padding: 2px 4px; }
+.inline-check { display: block; margin-top: 4px; }
+.inline-check input { margin-right: 4px; vertical-align: middle; }

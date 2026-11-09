@@ -440,6 +440,7 @@ func (c *Console) invite(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Label, Valid string
 		Share        bool
+		Video        string
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -448,7 +449,12 @@ func (c *Console) invite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		ttl = validFor["10m"]
 	}
-	inv, err := c.Pairing.New(req.Label, ttl, auth.InviteOptions{Share: req.Share})
+	video := auth.VideoReach(req.Video)
+	if !video.Valid() {
+		http.Error(w, "unknown video setting", http.StatusBadRequest)
+		return
+	}
+	inv, err := c.Pairing.New(req.Label, ttl, auth.InviteOptions{Share: req.Share, Video: video})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -490,8 +496,10 @@ func (c *Console) revoke(w http.ResponseWriter, r *http.Request) {
 // change the other, so they are pointers rather than plain values.
 func (c *Console) updateDevice(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Share *bool
-		Label *string
+		Share     *bool
+		Label     *string
+		Video     *string
+		Recursive bool
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -506,6 +514,13 @@ func (c *Console) updateDevice(w http.ResponseWriter, r *http.Request) {
 	if ok && err == nil && req.Label != nil {
 		if ok, err = c.Store.SetLabel(id, *req.Label); ok && err == nil {
 			c.Log.Info("device renamed on the console", "id", id, "label", *req.Label)
+		}
+	}
+	if ok && err == nil && req.Video != nil {
+		// The console is the owner: no cap, and sub-shares follow if asked.
+		if ok, err = c.Store.SetVideoFor(id, auth.VideoReach(*req.Video), "", req.Recursive); ok && err == nil {
+			c.Log.Info("device video changed on the console",
+				"id", id, "video", *req.Video, "recursive", req.Recursive)
 		}
 	}
 	respond(w, ok, err)

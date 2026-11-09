@@ -200,6 +200,68 @@ function editLabel(td, d) {
   input.select();
 }
 
+// How far from home a device may fetch video. A film is about a gigabyte
+// an hour: direct spends the home connection, the satellite spends a relay
+// the owner pays for. Music is unaffected either way.
+const videoChoices = [
+  ['', 'Home network only'],
+  ['direct', 'Also from outside'],
+  ['satellite', 'Also via satellite'],
+];
+
+// Devices invited through this one, however far down.
+function subShares(s, id) {
+  const byParent = new Map();
+  for (const d of s.devices) {
+    if (!byParent.has(d.invitedBy)) byParent.set(d.invitedBy, []);
+    byParent.get(d.invitedBy).push(d.id);
+  }
+  const out = [];
+  const queue = [...(byParent.get(id) || [])];
+  while (queue.length) {
+    const next = queue.shift();
+    out.push(next);
+    queue.push(...(byParent.get(next) || []));
+  }
+  return out;
+}
+
+function videoCell(s, d) {
+  const td = cell('', 'Video');
+  const sel = document.createElement('select');
+  sel.className = 'small';
+  sel.setAttribute('aria-label', 'How far from home ' + (d.label || d.name) + ' may fetch video');
+  for (const [value, text] of videoChoices) {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = text;
+    o.selected = (d.video || '') === value;
+    sel.append(o);
+  }
+  // Only shown where it can mean something: a device nobody was invited
+  // through has no sub-shares to apply it to.
+  const kids = subShares(s, d.id);
+  let also = null;
+  if (kids.length > 0) {
+    const label = document.createElement('label');
+    label.className = 'secondary inline-check';
+    also = document.createElement('input');
+    also.type = 'checkbox';
+    label.append(also, document.createTextNode(
+      ' and the ' + kids.length + (kids.length === 1 ? ' device' : ' devices') + ' invited through it'));
+    td.append(sel, label);
+  } else {
+    td.append(sel);
+  }
+  sel.addEventListener('change', async () => {
+    sel.disabled = true;
+    await api('PUT', 'devices/' + d.id, { video: sel.value, recursive: !!(also && also.checked) })
+      .catch(alertError);
+    load();
+  });
+  return td;
+}
+
 function fill(tbody, empty, rows) {
   $(tbody).replaceChildren(...rows);
   $(empty).hidden = rows.length > 0;
@@ -260,6 +322,7 @@ function render(s) {
     tr.append(
       nameCell(s, d),
       accessCell(d),
+      videoCell(s, d),
       cell(dateFmt.format(new Date(d.created)), 'Paired'),
       cell(ago(d.lastSeen), 'Last access', d.lastSeen ? timeFmt.format(new Date(d.lastSeen)) : ''),
       cell(d.lastAddr || '—', 'From', from),
@@ -447,6 +510,7 @@ $('invite-form').addEventListener('submit', async (e) => {
   try {
     invitation = await api('POST', 'invitations', {
       label: $('label').value.trim(), valid: $('valid').value, share: $('share').checked,
+      video: $('inv-video').value,
     });
     $('qr').src = invitation.qr;
     $('inv-for').textContent = invitation.label ? 'For ' + invitation.label : 'For any device';
@@ -456,6 +520,7 @@ $('invite-form').addEventListener('submit', async (e) => {
     $('invitation').hidden = false;
     $('label').value = '';
     $('share').checked = false;
+    $('inv-video').value = '';
     load();
   } catch (x) {
     $('invite-error').textContent = x.message;
