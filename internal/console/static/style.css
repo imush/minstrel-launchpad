@@ -171,5 +171,13 @@ summary { cursor: pointer; font-size: 14px; color: var(--link); }
 
 /* The video choice sits in a table cell with its own sub-shares tickbox. */
 select.small { font: inherit; font-size: 13px; padding: 2px 4px; }
-.inline-check { display: block; margin-top: 4px; }
-.inline-check input { margin-right: 4px; vertical-align: middle; }
+/* Flex rather than an inline box: browsers give a checkbox its own left
+   margin, which pushed it off the cell's edge, and flex-start keeps it on
+   the first line when the text wraps. */
+/* Normal text flow, so the sentence wraps across the cell rather than a
+   word a line. The checkbox only needs its own default left margin taken
+   off to sit against the cell's edge. */
+.list .inline-check { display: block; margin-top: 4px; }
+/* The form rule above stretches inputs to full width, which for a
+   checkbox means a wide box with the control centred in it. */
+.list .inline-check input { width: auto; display: inline-block; margin: 0 5px 0 0; vertical-align: -2px; }
