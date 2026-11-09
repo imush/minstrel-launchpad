@@ -59,6 +59,9 @@ commands:
   console          print a link to set the console password
   devices          list paired devices
   rename <id> <who>  say whose device it is, e.g. "Sarah's phone"
+  video <id> <how>   how far from home a device may fetch video:
+                     home, direct or satellite; add -sub to apply it to
+                     everything that device invited
   revoke <id>      unpair a device
   share <id>       let a device invite others from the app
   unshare <id>     stop a device inviting others
@@ -87,6 +90,8 @@ func main() {
 		err = devices(args)
 	case "rename":
 		err = rename(args)
+	case "video":
+		err = setVideo(args)
 	case "revoke":
 		err = revoke(args)
 	case "share":
@@ -553,7 +558,7 @@ func devices(args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tFOR\tACCESS\tINVITED BY\tPAIRED\tLAST SEEN\tFROM")
+	fmt.Fprintln(tw, "ID\tNAME\tFOR\tACCESS\tVIDEO\tINVITED BY\tPAIRED\tLAST SEEN\tFROM")
 	for _, d := range list {
 		seen := "never"
 		if !d.LastSeen.IsZero() {
@@ -571,8 +576,9 @@ func devices(args []string) error {
 		if who == "" {
 			who = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			d.ID, d.Name, who, access, by, d.Created.Local().Format("2006-01-02"), seen, d.LastAddr)
+		video := map[auth.VideoReach]string{"": "home", "direct": "direct", "satellite": "satellite"}[d.Video]
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			d.ID, d.Name, who, access, video, by, d.Created.Local().Format("2006-01-02"), seen, d.LastAddr)
 	}
 	return tw.Flush()
 }
@@ -607,6 +613,42 @@ func rename(args []string) error {
 		fmt.Println(fs.Arg(0), "is no longer labelled")
 	} else {
 		fmt.Printf("%s is now %q\n", fs.Arg(0), who)
+	}
+	return nil
+}
+
+func setVideo(args []string) error {
+	fs := flag.NewFlagSet("video", flag.ExitOnError)
+	data := dataFlag(fs)
+	sub := fs.Bool("sub", false, "apply to every device invited through this one")
+	_ = fs.Parse(args)
+	if fs.NArg() != 2 {
+		return errors.New("usage: minstrel-launchpad video <device id> <home|direct|satellite> [-sub]")
+	}
+	// "home" reads better than the empty string the store uses for it.
+	reach := fs.Arg(1)
+	if reach == "home" {
+		reach = ""
+	}
+	if !auth.VideoReach(reach).Valid() {
+		return errors.New("video must be home, direct or satellite")
+	}
+	q := url.Values{"id": {fs.Arg(0)}, "reach": {reach}}
+	if *sub {
+		q.Set("recursive", "1")
+	}
+	if err := adminCall(*data, http.MethodPost, "/video?"+q.Encode(), nil); err != nil {
+		return err
+	}
+	what := map[string]string{
+		"":          "video only on the home network",
+		"direct":    "video from outside too",
+		"satellite": "video from outside, satellite included",
+	}[reach]
+	if *sub {
+		fmt.Printf("%s and everything it invited: %s\n", fs.Arg(0), what)
+	} else {
+		fmt.Printf("%s: %s\n", fs.Arg(0), what)
 	}
 	return nil
 }

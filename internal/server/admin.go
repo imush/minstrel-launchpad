@@ -192,6 +192,17 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
+	case r.URL.Path == "/video" && r.Method == http.MethodPost:
+		ok, err := a.Store.SetVideoFor(r.URL.Query().Get("id"),
+			auth.VideoReach(r.URL.Query().Get("reach")), "", r.URL.Query().Get("recursive") == "1")
+		switch {
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case !ok:
+			http.Error(w, "no such device", http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
 	case r.URL.Path == "/status" && r.Method == http.MethodGet:
 		writeJSON(w, map[string]any{
 			"name":        a.Pairing.Name(),

@@ -27,6 +27,8 @@ var appValidFor = map[string]time.Duration{
 //
 //	GET    /api/devices            every paired device; mine marks those this device invited
 //	DELETE /api/devices/<id>       revoke a device this device invited
+//	PUT    /api/devices/<id>       {video, recursive} for a device it invited,
+//	                               never granting more than this device holds
 //	GET    /api/invitations        this device's invitations not yet used
 //	POST   /api/invitations        {label, valid} → a listen-only invitation, with its QR code
 //	DELETE /api/invitations/<id>   cancel one of this device's invitations
@@ -49,6 +51,8 @@ func (h *Handler) sharing(w http.ResponseWriter, r *http.Request, dev auth.Devic
 		h.listInvitations(w, dev)
 	case path == "/api/invitations" && r.Method == http.MethodPost:
 		h.invite(w, r, dev)
+	case r.Method == http.MethodPut && strings.HasPrefix(path, "/api/devices/"):
+		h.setDeviceVideo(w, r, dev, strings.TrimPrefix(path, "/api/devices/"))
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/api/devices/"):
 		id := strings.TrimPrefix(path, "/api/devices/")
 		ok, err := h.Store.RevokeFor(id, dev.ID)
@@ -63,6 +67,33 @@ func (h *Handler) sharing(w http.ResponseWriter, r *http.Request, dev auth.Devic
 		http.NotFound(w, r)
 	}
 	return true
+}
+
+// setDeviceVideo lets a device change the video reach of one it invited.
+//
+// The store caps the grant at what this device holds, so nobody can pass
+// on more than they were given: a guest allowed video only at home cannot
+// hand the satellite to the next person down.
+func (h *Handler) setDeviceVideo(w http.ResponseWriter, r *http.Request, dev auth.Device, id string) {
+	var req struct {
+		Video     string `json:"video"`
+		Recursive bool   `json:"recursive"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	reach := auth.VideoReach(req.Video)
+	if !reach.Valid() {
+		http.Error(w, "video must be empty, direct or satellite", http.StatusBadRequest)
+		return
+	}
+	ok, err := h.Store.SetVideoFor(id, reach, dev.ID, req.Recursive)
+	if ok && err == nil {
+		h.Log.Info("device video changed in the app",
+			"id", id, "by", dev.ID, "asked", req.Video, "recursive", req.Recursive)
+	}
+	respond(w, ok, err, "no device you invited has that id")
 }
 
 func (h *Handler) listDevices(w http.ResponseWriter, dev auth.Device) {
@@ -109,6 +140,7 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request, dev auth.Device
 	var req struct {
 		Label string `json:"label"`
 		Valid string `json:"valid"`
+		Video string `json:"video"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -119,7 +151,13 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request, dev auth.Device
 		ttl = appValidFor["1d"]
 	}
 	// Always listen-only: only the console makes devices that may invite.
-	inv, err := h.Pairing.New(req.Label, ttl, auth.InviteOptions{InvitedBy: dev.ID})
+	video := auth.VideoReach(req.Video)
+	if !video.Valid() {
+		http.Error(w, "video must be empty, direct or satellite", http.StatusBadRequest)
+		return
+	}
+	inv, err := h.Pairing.New(req.Label, ttl,
+		auth.InviteOptions{InvitedBy: dev.ID, Video: video.AtMost(dev.Video)})
 	if err != nil {
 		h.Log.Error("invitation failed", "err", err)
 		http.Error(w, "invitation failed", http.StatusInternalServerError)

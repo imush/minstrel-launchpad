@@ -104,3 +104,72 @@ func TestSharing(t *testing.T) {
 		t.Errorf("%d invitations left, want the console's", n)
 	}
 }
+
+func TestSharingVideoIsCapped(t *testing.T) {
+	h, _, _, _ := setup(t)
+	h.Pairing = &Pairing{Fingerprint: "abc", Port: "8443", Store: h.Store}
+
+	// A device that may invite, but only allowed video from outside — not
+	// through the satellite.
+	owner, ownerID := pairWith(t, h, auth.InviteOptions{Share: true, Video: auth.VideoDirect})
+
+	// It asks for satellite on an invitation. It may not give what it
+	// hasn't got, so the invitation comes out capped at direct.
+	rec := do(h, "POST", "/api/invitations", owner, `{"label":"Kid","valid":"1h","video":"satellite"}`, nil)
+	if rec.Code != 200 {
+		t.Fatalf("invite: %d %s", rec.Code, rec.Body)
+	}
+	var inv struct{ Code string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &inv); err != nil {
+		t.Fatal(err)
+	}
+	_, kid, err := h.Store.Pair(inv.Code, "kid phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kid.Video != auth.VideoDirect {
+		t.Errorf("invitation granted %q, more than the inviter's direct", kid.Video)
+	}
+	if kid.InvitedBy != ownerID {
+		t.Errorf("invitedBy %q", kid.InvitedBy)
+	}
+
+	// The same cap applies to changing it afterwards.
+	if rec := do(h, "PUT", "/api/devices/"+kid.ID, owner, `{"video":"satellite"}`, nil); rec.Code != 204 {
+		t.Fatalf("set video: %d %s", rec.Code, rec.Body)
+	}
+	if got := videoOf(t, h, kid.ID); got != auth.VideoDirect {
+		t.Errorf("after the change the kid holds %q, more than the inviter", got)
+	}
+
+	// Lowering is always allowed.
+	if rec := do(h, "PUT", "/api/devices/"+kid.ID, owner, `{"video":""}`, nil); rec.Code != 204 {
+		t.Fatalf("lower: %d", rec.Code)
+	}
+	if got := videoOf(t, h, kid.ID); got != auth.VideoHome {
+		t.Errorf("not lowered: %q", got)
+	}
+
+	// A device it never invited is none of its business.
+	_, stranger := pairWith(t, h, auth.InviteOptions{})
+	if rec := do(h, "PUT", "/api/devices/"+stranger, owner, `{"video":"direct"}`, nil); rec.Code != 404 {
+		t.Errorf("changed a device it never invited: %d", rec.Code)
+	}
+
+	// And a listen-only device can't use any of this.
+	listener, _ := pairWith(t, h, auth.InviteOptions{})
+	if rec := do(h, "PUT", "/api/devices/"+kid.ID, listener, `{"video":"direct"}`, nil); rec.Code != 403 {
+		t.Errorf("a device that can't invite changed one anyway: %d", rec.Code)
+	}
+}
+
+func videoOf(t *testing.T, h *Handler, id string) auth.VideoReach {
+	t.Helper()
+	for _, d := range h.Store.Devices() {
+		if d.ID == id {
+			return d.Video
+		}
+	}
+	t.Fatalf("no device %s", id)
+	return ""
+}
