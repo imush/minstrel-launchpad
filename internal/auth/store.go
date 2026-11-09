@@ -38,11 +38,12 @@ var ErrBadCode = errors.New("invalid or expired pairing code")
 // Device is one paired app install.
 // VideoReach says how far from home a device may fetch video.
 //
-// Music and video are not the same cost. An album is tens of megabytes; a
-// film is about a gigabyte an hour, and through a satellite every one of
-// those bytes crosses a relay the launchpad's owner pays for. So the zero
-// value — what a device gets when nobody has said otherwise — is the
-// closed one.
+// The app plays music and downloads films rather than streaming them, so
+// in practice this governs a download. Either way the cost is the same
+// argument: an album is tens of megabytes, a film about a gigabyte an
+// hour, and through a satellite every one of those bytes crosses a relay
+// the launchpad's owner pays for. So the zero value — what a device gets
+// when nobody has said otherwise — is the closed one.
 type VideoReach string
 
 const (

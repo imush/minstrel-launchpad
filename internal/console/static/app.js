@@ -200,9 +200,9 @@ function editLabel(td, d) {
   input.select();
 }
 
-// How far from home a device may fetch video. A film is about a gigabyte
-// an hour: direct spends the home connection, the satellite spends a relay
-// the owner pays for. Music is unaffected either way.
+// How far from home a device may download video. A film is about a
+// gigabyte an hour: direct spends the home connection, the satellite
+// spends a relay the owner pays for. Music is unaffected either way.
 const videoChoices = [
   ['', 'Home network only'],
   ['direct', 'Also from outside'],
