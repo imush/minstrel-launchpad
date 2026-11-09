@@ -99,21 +99,23 @@ func (h *Handler) setDeviceVideo(w http.ResponseWriter, r *http.Request, dev aut
 func (h *Handler) listDevices(w http.ResponseWriter, dev auth.Device) {
 	// Not the addresses devices connect from: those are for the console.
 	type device struct {
-		ID        string    `json:"id"`
-		Name      string    `json:"name"`
-		Label     string    `json:"label,omitempty"`
-		Share     bool      `json:"share,omitempty"`
-		InvitedBy string    `json:"invitedBy,omitempty"`
-		Created   time.Time `json:"created"`
-		LastSeen  time.Time `json:"lastSeen,omitzero"`
-		Mine      bool      `json:"mine,omitempty"` // invited by the asking device, so it may revoke it
-		Self      bool      `json:"self,omitempty"`
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		Label     string          `json:"label,omitempty"`
+		Share     bool            `json:"share,omitempty"`
+		Video     auth.VideoReach `json:"video,omitempty"`
+		InvitedBy string          `json:"invitedBy,omitempty"`
+		Created   time.Time       `json:"created"`
+		LastSeen  time.Time       `json:"lastSeen,omitzero"`
+		Mine      bool            `json:"mine,omitempty"` // invited by the asking device, so it may revoke it
+		Self      bool            `json:"self,omitempty"`
 	}
 	out := []device{}
 	for _, d := range h.Store.Devices() {
 		out = append(out, device{
-			ID: d.ID, Name: d.Name, Label: d.Label, Share: d.Share, InvitedBy: d.InvitedBy,
-			Created: d.Created, LastSeen: d.LastSeen,
+			ID: d.ID, Name: d.Name, Label: d.Label, Share: d.Share, Video: d.Video,
+			InvitedBy: d.InvitedBy,
+			Created:   d.Created, LastSeen: d.LastSeen,
 			Mine: d.InvitedBy == dev.ID, Self: d.ID == dev.ID,
 		})
 	}
