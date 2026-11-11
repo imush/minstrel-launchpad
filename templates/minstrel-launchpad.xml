@@ -12,7 +12,7 @@
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://forums.unraid.net/topic/TODO-SUPPORT-THREAD/</Support>
+  <Support>https://github.com/imush/minstrel/discussions/categories/launchpad</Support>
   <Project>https://github.com/imush/minstrel-launchpad</Project>
   <Overview>
     Reach your own music from outside the house. minstrel-launchpad sits on
